@@ -108,6 +108,25 @@ identyfikatorów, ścieżek, flag CLI ani `camelCase`.
 **Domyślnie wyłączone**, tak jak w oryginale. Włączasz z menu tray →
 *Czyszczenie tekstu* → *Włącz czyszczenie*.
 
+Reszta ustawień siedzi w tym samym podmenu, w trzech grupach — każda podpisana
+aktualnym wyborem, więc stan widać bez rozwijania:
+
+```
+Czyszczenie tekstu >
+    [ ] Wlacz czyszczenie
+    ---
+    Provider: DeepSeek API >     Anthropic API / DeepSeek API / Claude Code CLI
+    Model: deepseek-v4-flash >   modele wybranego providera
+    Styl: Domyslny >             Domyslny / Czat / Doslowny
+    ---
+    Klucz API: anthropic...
+    Klucz API: deepseek...
+```
+
+Lista modeli pokazuje **tylko modele aktywnego providera** — po przełączeniu na
+DeepSeeka masz tam `deepseek-v4-flash` i `deepseek-v4-pro`, po przełączeniu na
+Anthropic `claude-haiku-4-5` i `claude-sonnet-5`.
+
 ### Który provider
 
 | | Anthropic API | DeepSeek API | Claude Code CLI |

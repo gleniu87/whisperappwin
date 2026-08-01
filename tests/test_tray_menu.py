@@ -96,9 +96,24 @@ class TrayMenuTest(unittest.TestCase):
 
     def submenu(self, title):
         for item in self.tray._icon.menu:
-            if item.text == title:
+            if str(item.text) == title:
                 return list(item.submenu)
         raise AssertionError(f"brak podmenu {title!r}")
+
+    def nested(self, title, prefix):
+        """A submenu inside 'Czyszczenie tekstu', found by its label prefix.
+
+        Those labels carry the current selection ("Model: deepseek-v4-flash"),
+        so they are matched on prefix rather than equality.
+
+        Note: iterating a pystray Menu yields only the items whose `visible`
+        currently evaluates true, so the model list returned here is already
+        filtered down to the selected provider's models.
+        """
+        for item in self.submenu(title):
+            if str(item.text).startswith(prefix):
+                return list(item.submenu)
+        raise AssertionError(f"brak pozycji {prefix!r} w {title!r}")
 
     # -- the arity trap -------------------------------------------------
 
@@ -123,16 +138,22 @@ class TrayMenuTest(unittest.TestCase):
         self.assertEqual(self.controller.calls, [("model", "medium")])
 
     def test_enhancement_provider_action_receives_the_key(self):
-        cli = next(i for i in self.submenu("Czyszczenie tekstu") if "CLI" in str(i.text))
+        cli = next(i for i in self.nested("Czyszczenie tekstu", "Provider:") if "CLI" in str(i.text))
         cli(SENTINEL_ICON)
         self.assertEqual(self.controller.calls, [("enhancement_provider", "claude_cli")])
 
     def test_enhancement_model_action_receives_the_name(self):
         sonnet = next(
-            i for i in self.submenu("Czyszczenie tekstu") if str(i.text) == "claude-sonnet-5"
+            i for i in self.nested("Czyszczenie tekstu", "Model:")
+            if str(i.text) == "claude-sonnet-5"
         )
         sonnet(SENTINEL_ICON)
         self.assertEqual(self.controller.calls, [("enhancement_model", "claude-sonnet-5")])
+
+    def test_enhancement_style_action_receives_the_key(self):
+        chat = next(i for i in self.nested("Czyszczenie tekstu", "Styl:") if "Czat" in str(i.text))
+        chat(SENTINEL_ICON)
+        self.assertEqual(self.controller.calls, [("enhancement_prompt", "chat")])
 
     def test_enhancement_toggle_flips_the_flag(self):
         toggle = next(
@@ -148,14 +169,31 @@ class TrayMenuTest(unittest.TestCase):
         self.assertNotIn("Ustaw klucz API...", labels)
 
     def test_every_action_in_the_tree_survives_being_invoked_by_pystray(self):
-        """Any action with the wrong arity raises TypeError when pystray calls it."""
+        """Any action with the wrong arity raises TypeError when pystray calls it.
+
+        Recursive on purpose: the clean-up settings are now nested two levels
+        deep, and a two-level walk would silently stop checking exactly the
+        items that were just moved.
+        """
         skip = {"Zakoncz", "Otworz konfiguracje", "Otworz historie", "Otworz log", "Odswiez liste"}
-        for item in self.tray._icon.menu:
-            targets = list(item.submenu) if item.submenu else [item]
-            for target in targets:
+        visited = []
+
+        def walk(items):
+            for target in items:
+                if target.submenu:
+                    walk(list(target.submenu))
+                    continue
                 if str(target.text) in skip or not target.enabled:
                     continue
+                visited.append(str(target.text))
                 target(SENTINEL_ICON)  # must not raise
+
+        walk(list(self.tray._icon.menu))
+        # Guard against the walk silently skipping the newly nested level.
+        # Only the *selected* provider's models are iterable (see the note on
+        # nested()), so this checks the default provider's model, not DeepSeek's.
+        self.assertIn("claude-haiku-4-5", visited)
+        self.assertIn("Czat / Slack", visited)
 
     # -- radio state ----------------------------------------------------
 
@@ -184,6 +222,51 @@ class TrayMenuTest(unittest.TestCase):
         ghost = next(i for i in mic_items if "Blue Yeti" in str(i.text))
         self.assertIn("niepodlaczony", str(ghost.text))
         self.assertTrue(ghost.checked)
+
+    # -- clean-up model picker ------------------------------------------
+
+    def test_deepseek_models_are_offered_when_deepseek_is_selected(self):
+        self.config.set("enhancement.provider", "deepseek")
+        labels = [str(i.text) for i in self.nested("Czyszczenie tekstu", "Model:")]
+        self.assertEqual(labels, ["deepseek-v4-flash", "deepseek-v4-pro"])
+
+    def test_choosing_the_deepseek_model_is_wired_through(self):
+        self.config.set("enhancement.provider", "deepseek")
+        pro = next(
+            i for i in self.nested("Czyszczenie tekstu", "Model:")
+            if str(i.text) == "deepseek-v4-pro"
+        )
+        pro(SENTINEL_ICON)
+        self.assertEqual(self.controller.calls, [("enhancement_model", "deepseek-v4-pro")])
+
+    def test_other_providers_models_stay_hidden(self):
+        """Visibility is re-evaluated per display, so a switch needs no rebuild."""
+        self.config.set("enhancement.provider", "claude_cli")
+        visible = [str(i.text) for i in self.nested("Czyszczenie tekstu", "Model:")]
+        self.assertNotIn("deepseek-v4-flash", visible)
+        self.assertIn("claude-sonnet-5", visible)
+
+    def test_selected_model_is_checked(self):
+        self.config.set("enhancement.provider", "deepseek")
+        self.config.set("enhancement.model", "deepseek-v4-flash")
+        items = {str(i.text): i for i in self.nested("Czyszczenie tekstu", "Model:")}
+        self.assertTrue(items["deepseek-v4-flash"].checked)
+        self.assertFalse(items["deepseek-v4-pro"].checked)
+
+    def test_group_labels_show_the_current_choice_without_opening_them(self):
+        self.config.set("enhancement.provider", "deepseek")
+        self.config.set("enhancement.model", "deepseek-v4-flash")
+        labels = [str(i.text) for i in self.submenu("Czyszczenie tekstu")]
+        self.assertIn("Model: deepseek-v4-flash", labels)
+        self.assertIn("Provider: DeepSeek API", labels)
+
+    def test_every_provider_has_at_least_one_model_offered(self):
+        """A provider whose models were all hidden would show an empty submenu."""
+        from whisperdictate.config import ENHANCEMENT_PROVIDERS
+
+        for key in ENHANCEMENT_PROVIDERS:
+            self.config.set("enhancement.provider", key)
+            self.assertTrue(self.nested("Czyszczenie tekstu", "Model:"), key)
 
     # -- tooltip --------------------------------------------------------
 

@@ -226,7 +226,16 @@ class Tray:
         return items
 
     def _enhancement_items(self) -> list[pystray.MenuItem]:
-        """Clean-up settings. Closures throughout — see the arity note in _device_items."""
+        """Clean-up settings, grouped.
+
+        Provider, model and style used to sit in one flat list of nine entries
+        with nothing to say which was which — the model picker was there, but
+        unfindable, and a provider switch silently changed what the middle group
+        meant. Each group is now its own submenu, labelled with the current
+        choice so the state reads without opening anything.
+
+        Closures throughout — see the arity note in _device_items.
+        """
         item = pystray.MenuItem
         items = [
             item(
@@ -235,52 +244,18 @@ class Tray:
                 checked=lambda _: bool(self.config.get("enhancement.enabled")),
             ),
             pystray.Menu.SEPARATOR,
-        ]
-
-        def radio(dotted: str, value: str, label: str, setter) -> pystray.MenuItem:  # noqa: ANN001
-            def select() -> None:
-                setter(value)
-
-            return item(
-                label,
-                select,
-                checked=lambda _, d=dotted, v=value: self.config.get(d) == v,
-                radio=True,
-            )
-
-        items += [
-            radio("enhancement.provider", key, PROVIDER_SPECS[key].label,
-                  self.controller.set_enhancement_provider)
-            for key in ENHANCEMENT_PROVIDERS
-        ]
-        items.append(pystray.Menu.SEPARATOR)
-
-        # Every provider's models are declared up front and hidden unless that
-        # provider is selected. pystray menus are immutable once built, but
-        # `visible` is re-evaluated on each display — so this stays correct
-        # after a provider switch without rebuilding the menu.
-        def model_entry(provider_key: str, model_name: str) -> pystray.MenuItem:
-            def select() -> None:
-                self.controller.set_enhancement_model(model_name)
-
-            return item(
-                model_name,
-                select,
-                checked=lambda _, m=model_name: self.config.get("enhancement.model") == m,
-                radio=True,
-                visible=lambda _, p=provider_key: self.config.get("enhancement.provider") == p,
-            )
-
-        for provider_key in ENHANCEMENT_PROVIDERS:
-            items += [
-                model_entry(provider_key, name)
-                for name in PROVIDER_SPECS[provider_key].models
-            ]
-        items.append(pystray.Menu.SEPARATOR)
-        items += [
-            radio("enhancement.prompt", key, PROMPT_LABELS[key],
-                  self.controller.set_enhancement_prompt)
-            for key in ENHANCEMENT_PROMPTS
+            item(
+                lambda _: f"Provider: {self._current_provider_label()}",
+                pystray.Menu(*self._provider_items()),
+            ),
+            item(
+                lambda _: f"Model: {self.config.get('enhancement.model')}",
+                pystray.Menu(*self._enhancement_model_items()),
+            ),
+            item(
+                lambda _: f"Styl: {self._current_style_label()}",
+                pystray.Menu(*self._style_items()),
+            ),
         ]
 
         if self._dispatcher is not None:
@@ -290,6 +265,67 @@ class Tray:
                     continue  # the CLI needs no key
                 items.append(self._api_key_entry(provider_key))
         return items
+
+    def _radio(self, dotted: str, value: str, label: str, setter) -> pystray.MenuItem:  # noqa: ANN001
+        def select() -> None:
+            setter(value)
+
+        return pystray.MenuItem(
+            label,
+            select,
+            checked=lambda _, d=dotted, v=value: self.config.get(d) == v,
+            radio=True,
+        )
+
+    def _provider_items(self) -> list[pystray.MenuItem]:
+        return [
+            self._radio("enhancement.provider", key, PROVIDER_SPECS[key].label,
+                        self.controller.set_enhancement_provider)
+            for key in ENHANCEMENT_PROVIDERS
+        ]
+
+    def _enhancement_model_items(self) -> list[pystray.MenuItem]:
+        """Every provider's models, each visible only under its own provider.
+
+        pystray menus are immutable once built, but `visible` is re-evaluated on
+        each display — so this stays correct after a provider switch without
+        rebuilding the menu.
+        """
+        def model_entry(provider_key: str, model_name: str) -> pystray.MenuItem:
+            def select() -> None:
+                self.controller.set_enhancement_model(model_name)
+
+            return pystray.MenuItem(
+                model_name,
+                select,
+                checked=lambda _, m=model_name: self.config.get("enhancement.model") == m,
+                radio=True,
+                visible=lambda _, p=provider_key: self.config.get("enhancement.provider") == p,
+            )
+
+        items: list[pystray.MenuItem] = []
+        for provider_key in ENHANCEMENT_PROVIDERS:
+            items += [
+                model_entry(provider_key, name)
+                for name in PROVIDER_SPECS[provider_key].models
+            ]
+        return items
+
+    def _style_items(self) -> list[pystray.MenuItem]:
+        return [
+            self._radio("enhancement.prompt", key, PROMPT_LABELS[key],
+                        self.controller.set_enhancement_prompt)
+            for key in ENHANCEMENT_PROMPTS
+        ]
+
+    def _current_provider_label(self) -> str:
+        key = str(self.config.get("enhancement.provider", ""))
+        spec = PROVIDER_SPECS.get(key)
+        return spec.label.split(" (")[0] if spec else key
+
+    def _current_style_label(self) -> str:
+        key = str(self.config.get("enhancement.prompt", ""))
+        return PROMPT_LABELS.get(key, key).split(" (")[0]
 
     def _api_key_entry(self, provider_key: str) -> pystray.MenuItem:
         def open_dialog() -> None:

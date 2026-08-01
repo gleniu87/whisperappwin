@@ -19,8 +19,12 @@ log = logging.getLogger(__name__)
 
 _TARGET_PREFIX = "WhisperDictateWin:"
 
-# pywin32 hands back the blob as raw bytes; the Credential Manager convention
-# for text blobs is UTF-16-LE, and mismatching this yields mojibake, not an error.
+# The blob API is asymmetric, verified against pywin32 rather than assumed:
+#   CredWrite wants a str and encodes it as UTF-16-LE itself. Handing it bytes
+#     raises TypeError("Objects of type 'bytes' can not be converted to Unicode").
+#   CredRead hands back raw bytes, which we decode with the same encoding.
+# Getting the read side wrong yields mojibake rather than an error, so the
+# encoding is named here once and used only on the way in.
 _ENCODING = "utf-16-le"
 
 
@@ -61,7 +65,8 @@ def set_api_key(provider: str, key: str) -> None:
             "Type": win32cred.CRED_TYPE_GENERIC,
             "TargetName": target_for(provider),
             "UserName": provider,
-            "CredentialBlob": key.encode(_ENCODING),
+            # str, not bytes — see the encoding note at the top of this module.
+            "CredentialBlob": key,
             "Comment": f"WhisperDictate for Windows - klucz API ({provider})",
             # LOCAL_MACHINE, not ENTERPRISE: keys must not roam to other machines
             # with a domain profile.

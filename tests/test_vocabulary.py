@@ -239,6 +239,39 @@ class PendingTest(unittest.TestCase):
         self.assertEqual(vocabulary.pending([], "", ""), [])
 
 
+class BaseFormTest(unittest.TestCase):
+    """Guessing the nominative from whatever form the sentence needed.
+
+    A guess, not a rule - the dialog keeps the field editable and shows the
+    original. These pin the common Polish case endings on borrowed nouns.
+    """
+
+    def test_strips_common_case_endings(self):
+        for inflected, expected in (
+            ("Anthropica", "Anthropic"),
+            ("DeepSeeka", "DeepSeek"),
+            ("DeepSeekowi", "DeepSeek"),
+            ("DeepSeekiem", "DeepSeek"),
+            ("DeepSeeku", "DeepSeek"),
+            ("Sonneta", "Sonnet"),
+        ):
+            self.assertEqual(vocabulary.base_form(inflected), expected, inflected)
+
+    def test_leaves_uninflected_names_alone(self):
+        for name in ("Kubernetes", "Docker", "Redis", "GitHub", "PostgreSQL"):
+            self.assertEqual(vocabulary.base_form(name), name)
+
+    def test_refuses_to_shorten_below_a_usable_stem(self):
+        """"Java" -> "Jav" is the failure this guard prevents."""
+        self.assertEqual(vocabulary.base_form("Java"), "Java")
+
+    def test_multi_word_names_are_left_alone(self):
+        self.assertEqual(vocabulary.base_form("Claude Code"), "Claude Code")
+
+    def test_handles_blank_input(self):
+        self.assertEqual(vocabulary.base_form(""), "")
+
+
 class AddTest(unittest.TestCase):
     def test_appends_to_an_empty_list(self):
         self.assertEqual(vocabulary.add("", "DeepSeek"), "DeepSeek")
@@ -254,6 +287,28 @@ class AddTest(unittest.TestCase):
 
     def test_blank_term_changes_nothing(self):
         self.assertEqual(vocabulary.add("A", "   "), "A")
+
+    def test_inflected_form_is_not_added_next_to_the_stem(self):
+        """The real bug: accepting a suggestion left Anthropic AND Anthropica."""
+        self.assertEqual(vocabulary.add("Anthropic", "Anthropica"), "Anthropic")
+
+    def test_stem_supersedes_an_inflected_entry_in_place(self):
+        self.assertEqual(
+            vocabulary.add("Sonnet, Anthropica, Docker", "Anthropic"),
+            "Sonnet, Anthropic, Docker",
+        )
+
+    def test_a_longer_name_sharing_a_prefix_is_still_added(self):
+        """"Claude Code" is not an inflection of "Claude" - the space says so."""
+        self.assertEqual(vocabulary.add("Claude", "Claude Code"), "Claude, Claude Code")
+
+    def test_an_unrelated_name_sharing_a_prefix_is_still_added(self):
+        """Four characters of suffix is a different word, not an ending."""
+        self.assertEqual(vocabulary.add("Post", "PostgreSQL"), "Post, PostgreSQL")
+
+    def test_combining_the_two_sources_collapses_the_inflected_entry(self):
+        """Shared file has the stem, config has the inflected form: one survives."""
+        self.assertEqual(vocabulary.combined("Anthropica", "Anthropic"), "Anthropic")
 
 
 class PromptIntegrationTest(unittest.TestCase):

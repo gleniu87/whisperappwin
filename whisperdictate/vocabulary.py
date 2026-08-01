@@ -224,13 +224,78 @@ def pending(entries, known: str | None, rejected: str | None) -> list[Suggestion
     return list(seen.values())
 
 
+#: Polish case endings on borrowed masculine nouns: DeepSeeka, DeepSeekowi,
+#: DeepSeekiem, DeepSeeku, Anthropica. Longest first so "owi" wins over "i".
+_ENDINGS = ("owi", "iem", "em", "a", "u")
+
+#: Below this a stem is too short to trust; "Java" -> "Jav" is the failure mode.
+_MIN_STEM = 4
+
+
+def _is_inflection_of(longer: str, shorter: str) -> bool:
+    """True when `longer` is `shorter` plus a case ending.
+
+    The space check is what keeps "Claude" from swallowing "Claude Code": that
+    difference is another word, not an ending.
+    """
+    if not longer.startswith(shorter) or longer == shorter:
+        return False
+    suffix = longer[len(shorter):]
+    return " " not in suffix and len(suffix) <= 3
+
+
+def base_form(word: str) -> str:
+    """Best guess at the nominative. A guess - the caller must let it be edited.
+
+    The clean-up model returns whatever form the sentence needed ("Anthropica"),
+    but the vocabulary wants the stem: it primes Whisper and anchors the prompt,
+    and an inflected entry does both jobs worse.
+
+    Deliberately no dictionary and no cleverness. It is wrong on names that
+    genuinely end in -a ("Java" -> "Jav"), which is why the dialog shows the
+    original alongside and the field stays editable.
+    """
+    cleaned = " ".join(str(word or "").split())
+    if " " in cleaned:
+        return cleaned  # multi-word names are not declined as one token here
+    for ending in _ENDINGS:
+        if cleaned.lower().endswith(ending) and len(cleaned) - len(ending) >= _MIN_STEM:
+            return cleaned[: -len(ending)]
+    return cleaned
+
+
 def add(known: str | None, term: str) -> str:
-    """Append a term to a comma-separated list, without duplicating it."""
+    """Append a term, collapsing inflected forms onto the base one.
+
+    Without this, accepting a suggestion before the stem was known leaves both
+    "Anthropic" and "Anthropica" in the list - which is how the real vocabulary
+    ended up with one of each.
+    """
     existing = list(terms(known))
     cleaned = " ".join(str(term or "").split())
-    if cleaned and _fold(cleaned) not in {_fold(t) for t in existing}:
-        existing.append(cleaned)
-    return ", ".join(existing)
+    if not cleaned:
+        return ", ".join(existing)
+
+    new_fold = _fold(cleaned)
+    result: list[str] = []
+    replaced = False
+    for current in existing:
+        current_fold = _fold(current)
+        if current_fold == new_fold:
+            return ", ".join(existing)  # already there, verbatim
+        if _is_inflection_of(new_fold, current_fold):
+            return ", ".join(existing)  # the new one is an inflection: keep the stem
+        if _is_inflection_of(current_fold, new_fold):
+            # The new one is the stem; it supersedes the inflected entry in place.
+            if not replaced:
+                result.append(cleaned)
+                replaced = True
+            continue
+        result.append(current)
+
+    if not replaced:
+        result.append(cleaned)
+    return ", ".join(result)
 
 
 def prompt_section(raw: str | None) -> str:

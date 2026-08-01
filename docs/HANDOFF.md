@@ -187,6 +187,18 @@ w `history.jsonl` i nie działa przy wyłączonym czyszczeniu. Sekcja promptu ma
 jawny zakaz dopisywania nazw z listy — bez niego model wstawia je tam, gdzie ich
 nie było.
 
+**Okno Tk parentowane do withdrawn roota MUSI mieć `transient()` warunkowo.**
+`root` aplikacji jest withdrawn (nie ma okna głównego). `Toplevel` z
+`transient(root)` na takim roocie **nigdy się nie mapuje** — zostaje 1×1 w rogu
+i użytkownik nic nie widzi. Kolejność: `transient` tylko gdy
+`root.winfo_viewable()`, potem `deiconify()`, `wait_visibility()`, `grab_set()`.
+Tak robi `tkinter.simpledialog` i dlatego tamte dialogi działały, a mój własny
+nie. Wyszło dopiero przy zrzucie ekranu — testy tego nie łapią.
+
+**`add()` scala formy odmienione na podstawową.** Bez tego w słowniku lądują
+`Anthropic` i `Anthropica` obok siebie — zdarzyło się naprawdę. Różnica ze spacją
+(`Claude` vs `Claude Code`) to inne słowo, nie końcówka, i musi zostać dodane.
+
 **Propozycje słownika NIGDY nie dopisują się same.** Próg to jedno wystąpienie —
 i jest bezpieczny wyłącznie dlatego, że filtrem jest użytkownik. Gdyby wpisy
 lądowały w słowniku bez potwierdzenia, błędny wpis trafiłby do `initial_prompt`

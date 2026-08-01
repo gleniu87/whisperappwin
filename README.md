@@ -48,7 +48,7 @@ comparable.
 
 ## Requirements
 
-| Requierement | Specification |
+| Requirement | Specification |
 |---|---|
 | OS | Windows 10 1809+ / Windows 11 |
 | Python | 3.10 or newer |

@@ -62,6 +62,24 @@ def _trigger_table() -> dict[str, frozenset]:
 
 TRIGGERS = _trigger_table()
 
+#: The default. Right Alt was the original choice and it is the worst one on a
+#: Polish layout: it *is* AltGr, so every "ą" is a press of the dictation key.
+#: The 300 ms threshold and the cancel-on-character rule keep that from starting
+#: a recording most of the time, but "most of the time" is not good enough for a
+#: key you hit dozens of times per paragraph. Right Ctrl carries no such duty.
+DEFAULT_KEY = "ctrl_r"
+
+#: The subset offered in the tray, with the trade-off spelled out. The config
+#: still accepts anything in TRIGGERS, F1-F20 included.
+MENU_TRIGGERS: tuple[tuple[str, str], ...] = (
+    ("ctrl_r", "Prawy Ctrl (zalecany)"),
+    ("ctrl_l", "Lewy Ctrl"),
+    ("alt_r", "Prawy Alt / AltGr - koliduje z ą, ę, ó"),
+    ("alt_l", "Lewy Alt"),
+    ("scroll_lock", "Scroll Lock"),
+    ("pause", "Pause"),
+)
+
 
 class HotkeyListener:
     """Watches the keyboard and calls back on start / stop / cancel.
@@ -73,7 +91,7 @@ class HotkeyListener:
     def __init__(
         self,
         *,
-        key: str = "alt_r",
+        key: str = DEFAULT_KEY,
         mode: str = "hold",
         hold_threshold_ms: int = 300,
         cancel_on_other_key: bool = True,
@@ -81,10 +99,9 @@ class HotkeyListener:
         on_stop: Callable[[], None],
         on_cancel: Callable[[], None] = lambda: None,
     ):
-        self.trigger_keys = TRIGGERS.get(key.lower(), TRIGGERS["alt_r"])
-        if key.lower() not in TRIGGERS:
-            log.warning("Nieznany klawisz %r - uzywam alt_r. Dostepne: %s", key, ", ".join(sorted(TRIGGERS)))
-        self.key_name = key.lower()
+        self.trigger_keys = TRIGGERS[DEFAULT_KEY]
+        self.key_name = DEFAULT_KEY
+        self._adopt_key(key)
         self.mode = mode if mode in ("hold", "toggle") else "hold"
         self.hold_threshold = max(0.0, hold_threshold_ms / 1000.0)
         self.cancel_on_other_key = cancel_on_other_key
@@ -121,6 +138,39 @@ class HotkeyListener:
         if self._listener is not None:
             self._listener.stop()
             self._listener = None
+
+    def _adopt_key(self, key: str) -> bool:
+        """Point the trigger at `key`. False if the name was not recognised."""
+        name = str(key or "").lower()
+        if name not in TRIGGERS:
+            log.warning(
+                "Nieznany klawisz %r - uzywam %s. Dostepne: %s",
+                key, DEFAULT_KEY, ", ".join(sorted(TRIGGERS)),
+            )
+            return False
+        self.trigger_keys = TRIGGERS[name]
+        self.key_name = name
+        return True
+
+    def set_key(self, key: str) -> bool:
+        """Switch the trigger key on a running listener.
+
+        No need to restart the hook - it already sees every key and only
+        compares against `trigger_keys`. Any gesture in flight is abandoned, so
+        releasing the old key cannot stop a recording the new key never started.
+        """
+        if not self._adopt_key(key):
+            return False
+        with self._lock:
+            was_recording = self._recording
+            self._recording = False
+            self._trigger_down = False
+            self._gesture_cancelled = True
+        self._cancel_timer()
+        if was_recording:
+            self._safe(self._on_cancel)
+        log.info("Hotkey zmieniony na: %s", self.key_name)
+        return True
 
     def set_enabled(self, enabled: bool) -> None:
         """Pause without tearing down the hook. An in-flight recording is cancelled."""

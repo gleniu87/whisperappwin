@@ -37,7 +37,9 @@ MODEL_CHOICES = (
 
 DEFAULTS: dict[str, Any] = {
     "hotkey": {
-        "key": "alt_r",
+        # Right Ctrl, not right Alt: on a Polish layout right Alt is AltGr, so
+        # the dictation key would be pressed on every ą, ę, ó. See hotkey.py.
+        "key": "ctrl_r",
         "mode": "hold",
         "hold_threshold_ms": 300,
         "cancel_on_other_key": True,
@@ -50,6 +52,10 @@ DEFAULTS: dict[str, Any] = {
         "beam_size": 5,
         "vad_filter": True,
         "initial_prompt": "",
+        # Comma-separated proper nouns. Primes Whisper and is handed to the
+        # clean-up model, so a name that still comes back garbled can be
+        # repaired. See whisperdictate/vocabulary.py.
+        "vocabulary": "",
     },
     "audio": {
         "device": None,

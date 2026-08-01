@@ -11,6 +11,37 @@ from ..enhance import credentials, spec
 log = logging.getLogger(__name__)
 
 
+def edit_vocabulary(root: tk.Tk, controller) -> None:  # noqa: ANN001 - avoids a circular import
+    """Edit the comma-separated proper-noun list."""
+    from ..vocabulary import terms
+
+    current = str(controller.config.get("transcription.vocabulary", "") or "")
+
+    root.attributes("-topmost", True)
+    try:
+        answer = simpledialog.askstring(
+            "WhisperDictate - nazwy wlasne",
+            "Nazwy, ktore Whisper przekreca, po przecinku.\n"
+            "Np.: DeepSeek, Claude Code, ICE InsureTech\n\n"
+            "Trafiaja do Whispera (zeby uslyszal je poprawnie)\n"
+            "i do modelu czyszczacego (zeby naprawil te przekrecone).",
+            initialvalue=current,
+            parent=root,
+        )
+        if answer is None:
+            return  # cancelled
+
+        controller.set_vocabulary(answer)
+        count = len(terms(answer))
+        messagebox.showinfo(
+            "WhisperDictate",
+            f"Zapisano {count} nazw(y)." if count else "Lista wyczyszczona.",
+            parent=root,
+        )
+    finally:
+        root.attributes("-topmost", False)
+
+
 def manage_api_key(root: tk.Tk, provider: str) -> None:
     """Set, replace, or clear the API key for one provider."""
     provider_spec = spec(provider)

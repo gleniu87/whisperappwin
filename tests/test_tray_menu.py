@@ -68,6 +68,14 @@ class FakeController:
     def set_model(self, name):
         self.calls.append(("model", name))
 
+    def set_hotkey_key(self, key):
+        self.calls.append(("hotkey_key", key))
+        self.config.set("hotkey.key", key)
+
+    def set_vocabulary(self, raw):
+        self.calls.append(("vocabulary", raw))
+        self.config.set("transcription.vocabulary", raw)
+
     def set_paused(self, paused):
         self.calls.append(("paused", paused))
         self.paused = paused
@@ -99,6 +107,13 @@ class TrayMenuTest(unittest.TestCase):
             if str(item.text) == title:
                 return list(item.submenu)
         raise AssertionError(f"brak podmenu {title!r}")
+
+    def nested_top(self, prefix):
+        """A top-level submenu whose label carries its current selection."""
+        for item in self.tray._icon.menu:
+            if str(item.text).startswith(prefix):
+                return list(item.submenu)
+        raise AssertionError(f"brak pozycji {prefix!r} w menu glownym")
 
     def nested(self, title, prefix):
         """A submenu inside 'Czyszczenie tekstu', found by its label prefix.
@@ -222,6 +237,28 @@ class TrayMenuTest(unittest.TestCase):
         ghost = next(i for i in mic_items if "Blue Yeti" in str(i.text))
         self.assertIn("niepodlaczony", str(ghost.text))
         self.assertTrue(ghost.checked)
+
+    # -- hotkey picker ---------------------------------------------------
+
+    def test_hotkey_choice_is_wired_through(self):
+        alt = next(i for i in self.nested_top("Hotkey:") if "Prawy Alt" in str(i.text))
+        alt(SENTINEL_ICON)
+        self.assertEqual(self.controller.calls, [("hotkey_key", "alt_r")])
+
+    def test_right_ctrl_is_checked_by_default(self):
+        items = {str(i.text): i for i in self.nested_top("Hotkey:")}
+        checked = [text for text, i in items.items() if i.checked]
+        self.assertEqual(checked, ["Prawy Ctrl (zalecany)"])
+
+    def test_hotkey_label_shows_the_current_key(self):
+        self.config.set("hotkey.key", "alt_r")
+        labels = [str(i.text) for i in self.tray._icon.menu]
+        self.assertIn("Hotkey: Prawy Alt / AltGr", labels)
+
+    def test_altgr_option_warns_about_diacritics(self):
+        """The trade-off belongs next to the option, not only in the README."""
+        alt = next(i for i in self.nested_top("Hotkey:") if "Prawy Alt" in str(i.text))
+        self.assertIn("ą", str(alt.text))
 
     # -- clean-up model picker ------------------------------------------
 

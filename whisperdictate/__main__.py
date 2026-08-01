@@ -19,13 +19,13 @@ import threading
 import time
 import tkinter as tk
 
-from . import APP_NAME, __version__, paths
+from . import APP_NAME, __version__, paths, vocabulary
 from .audio import AudioError, Recorder, list_input_devices
 from .config import Config
 from .controller import DictationController
 from .enhance import EnhancementService, credentials
 from .history import History
-from .hotkey import TRIGGERS, HotkeyListener
+from .hotkey import DEFAULT_KEY, TRIGGERS, HotkeyListener
 from .sounds import Sounds
 from .transcriber import Transcriber, TranscriptionError
 
@@ -97,7 +97,10 @@ def build_transcriber(config: Config) -> Transcriber:
         compute_type=config.get("transcription.compute_type", "auto"),
         beam_size=int(config.get("transcription.beam_size", 5)),
         vad_filter=bool(config.get("transcription.vad_filter", True)),
-        initial_prompt=config.get("transcription.initial_prompt", "") or "",
+        initial_prompt=vocabulary.whisper_priming(
+            config.get("transcription.vocabulary", ""),
+            config.get("transcription.initial_prompt", ""),
+        ),
     )
 
 
@@ -157,7 +160,7 @@ def cmd_check(config: Config) -> int:
     for device in devices[:5]:
         print(f"                   {device}")
 
-    key = config.get("hotkey.key", "alt_r")
+    key = config.get("hotkey.key", DEFAULT_KEY)
     known = "OK" if key in TRIGGERS else f"NIEZNANY (dostepne: {', '.join(sorted(TRIGGERS))})"
     print(f"  Hotkey           {key} / {config.get('hotkey.mode')} - {known}")
 
@@ -505,7 +508,7 @@ def run_app(config: Config) -> int:
     controller.add_ui(tray)
 
     listener = HotkeyListener(
-        key=config.get("hotkey.key", "alt_r"),
+        key=config.get("hotkey.key", DEFAULT_KEY),
         mode=config.get("hotkey.mode", "hold"),
         hold_threshold_ms=int(config.get("hotkey.hold_threshold_ms", 300)),
         cancel_on_other_key=bool(config.get("hotkey.cancel_on_other_key", True)),
@@ -513,6 +516,7 @@ def run_app(config: Config) -> int:
         on_stop=controller.on_stop,
         on_cancel=controller.on_cancel,
     )
+    controller.attach_hotkey(listener)
 
     signal.signal(signal.SIGINT, lambda *_: quit_event.set())
 

@@ -69,10 +69,16 @@ zostaje zaznaczone w menu jako *(niepodlaczony)*, żeby było widać, na co apli
 czeka. **Odswiez liste** wymusza ponowne wykrycie sprzętu (PortAudio buforuje listę
 przy starcie, więc świeżo podłączony mikrofon inaczej się nie pojawi).
 
-### Prawy Alt a polskie znaki
+### Klawisz dyktowania a polskie znaki
 
-Na układzie *Polski (programisty)* prawy Alt to AltGr — klawisz, którym piszesz
-`ą ę ó ś ł ż ź ć ń`. Trzy mechanizmy sprawiają, że hotkey mu nie przeszkadza:
+Domyślnie **prawy Ctrl**. Zmienisz w menu tray → *Hotkey*: prawy/lewy Ctrl,
+prawy/lewy Alt, Scroll Lock, Pause. W konfiguracji (`hotkey.key`) przejdą też
+`f1`–`f20`. Zmiana działa od razu, bez restartu.
+
+**Prawego Alta lepiej nie używać na polskim układzie**, i to jest jedyny powód,
+dla którego domyślnym klawiszem nie jest on: na układzie *Polski (programisty)*
+prawy Alt **to** AltGr — klawisz, którym piszesz `ą ę ó ś ł ż ź ć ń`. Trzy
+mechanizmy łagodzą kolizję:
 
 1. **Nic nie jest przechwytywane.** Hook tylko obserwuje klawiaturę; AltGr dociera
    do aplikacji nietknięty, niezależnie od tego, czy WhisperDictate działa.
@@ -85,8 +91,38 @@ Klawisze modyfikujące są z punktu 3 wyłączone celowo: Windows przy każdym A
 wysyła dodatkowo syntetyczny lewy Ctrl, więc gdyby modyfikatory anulowały gest,
 hotkey nie zadziałałby ani razu.
 
-Jeśli mimo to przeszkadza, zmień `hotkey.key` w konfiguracji na `f9`,
-`scroll_lock` albo `ctrl_r`, albo podnieś `hold_threshold_ms`.
+To wystarcza na *większość* naciśnięć, ale nie na wszystkie — dłuższe zawahanie
+przy `ą` potrafi przekroczyć próg i włączyć nagrywanie. Przy klawiszu, który
+naciskasz kilkadziesiąt razy na akapit, „prawie zawsze dobrze" jest za mało.
+Stąd prawy Ctrl jako domyślny; opcja `alt_r` została, bo na układzie *Polski
+(214)* i na klawiaturach bez AltGr problem nie występuje.
+
+**Jeśli aktualizujesz starszą instalację**, w Twoim `config.toml` nadal siedzi
+`key = "alt_r"` — nowa domyślna wartość dotyczy tylko świeżych konfiguracji.
+Przełącz w menu tray.
+
+### Nazwy własne, które Whisper przekręca
+
+Whisper nie zna nazw, których nie ma powodu się spodziewać: „DeepSeek" wraca jako
+`Dipsick`, `dipsyka`, `Deepsika`. Model czyszczący zwykle tego nie naprawi — nie
+ma się czego uchwycić, a zgadywanie byłoby halucynacją.
+
+Menu tray → *Czyszczenie tekstu* → **Nazwy wlasne...** (albo `transcription.vocabulary`).
+Lista po przecinku, nazwy wieloczłonowe dozwolone:
+
+```
+DeepSeek, Claude Code, Anthropic, ICE InsureTech, Tomasz Glen
+```
+
+Jedna lista trafia w **dwa** miejsca:
+
+- do `initial_prompt` Whispera — żeby usłyszał je poprawnie i problem nie powstał,
+- do promptu modelu czyszczącego — żeby naprawił to, co mimo wszystko przekręcił.
+
+Żadna połowa nie wystarcza sama. Priming czasem nie zadziała, a naprawa po fakcie
+zostawia przekręcony tekst w historii i nie pomaga przy wyłączonym czyszczeniu.
+Prompt zawiera jawny zakaz dopisywania nazw z listy do transkrypcji, w których nic
+ich nie przypomina — bez tego model zaczyna je wstawiać tam, gdzie ich nie było.
 
 ## Czyszczenie tekstu przez LLM
 

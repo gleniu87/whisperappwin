@@ -181,6 +181,36 @@ class DictationController:
         log.info("Mikrofon: %s", spec if spec is not None else "domyslny systemowy")
         self._set_state(self._state)
 
+    def attach_hotkey(self, listener) -> None:  # noqa: ANN001 - HotkeyListener; avoids a cycle
+        """Injected after construction: the listener needs this object's callbacks."""
+        self.hotkey = listener
+
+    def set_hotkey_key(self, key: str) -> None:
+        """Change the push-to-talk key, live."""
+        listener = getattr(self, "hotkey", None)
+        if listener is not None and not listener.set_key(key):
+            self._notify(f"Nieznany klawisz: {key}", error=True)
+            return
+        self.config.set("hotkey.key", key)
+        log.info("Hotkey: %s", key)
+        self._set_state(self._state)
+
+    def set_vocabulary(self, raw: str) -> None:
+        """Update the proper-noun list and re-prime the loaded model.
+
+        Pushed onto the live transcriber rather than waiting for a restart: the
+        list is edited precisely when a name has just come back mangled, and
+        being told to restart at that moment is the wrong answer.
+        """
+        from . import vocabulary
+
+        self.config.set("transcription.vocabulary", raw)
+        self.transcriber.initial_prompt = vocabulary.whisper_priming(
+            raw, self.config.get("transcription.initial_prompt", "")
+        ) or None
+        log.info("Slownik nazw wlasnych: %d pozycji", len(vocabulary.terms(raw)))
+        self._set_state(self._state)
+
     def set_enhancement_enabled(self, enabled: bool) -> None:
         """Turn transcript clean-up on or off, warning if the provider is unusable."""
         self.config.set("enhancement.enabled", enabled)

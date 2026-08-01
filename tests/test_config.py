@@ -20,7 +20,7 @@ class ConfigTest(unittest.TestCase):
         self.assertTrue(self.path.exists())
         self.assertEqual(cfg.get("transcription.language"), "pl")
         self.assertEqual(cfg.get("transcription.model"), "large-v3-turbo")
-        self.assertEqual(cfg.get("hotkey.key"), "alt_r")
+        self.assertEqual(cfg.get("hotkey.key"), "ctrl_r")
 
     def test_dotted_get_returns_default_for_missing_path(self):
         cfg = Config.load(self.path)

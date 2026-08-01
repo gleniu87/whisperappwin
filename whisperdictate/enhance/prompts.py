@@ -152,9 +152,18 @@ def language_directive(code: str | None) -> str:
     return ""
 
 
-def build(prompt_key: str, language: str | None) -> str:
-    """Full system prompt for a style key, with the language lock appended."""
-    return PROMPTS.get(prompt_key, DEFAULT) + language_directive(language)
+def build(prompt_key: str, language: str | None, vocabulary_raw: str | None = "") -> str:
+    """Full system prompt: style body, the user's proper nouns, language lock.
+
+    The language lock stays last so it still outranks everything above it.
+    """
+    from ..vocabulary import prompt_section
+
+    return (
+        PROMPTS.get(prompt_key, DEFAULT)
+        + prompt_section(vocabulary_raw)
+        + language_directive(language)
+    )
 
 
 def wrap_transcript(text: str) -> str:

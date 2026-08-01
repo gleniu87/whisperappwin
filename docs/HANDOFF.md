@@ -32,7 +32,7 @@ odtwarzaniem kolejnej funkcji.
 | Sprzęt | i7-12700H, 64 GB RAM, RTX 3070 Ti Laptop (8 GB VRAM) |
 | GPU | działa: `large-v3-turbo @ cuda/float16`, ~29× realtime |
 | Mikrofon | `audio.device = "Mikrofon (Anker PowerConf C200)"` |
-| Testy | **197, wszystkie przechodzą** — `.\.venv\Scripts\python.exe -m unittest discover -s tests -t .` |
+| Testy | **239, wszystkie przechodzą** — `.\.venv\Scripts\python.exe -m unittest discover -s tests -t .` |
 
 Uruchamianie: `.\run.ps1` (z konsolą) albo `.\run.ps1 -Hidden` (tylko tray).
 Diagnostyka: `.\run.ps1 -Check`.
@@ -102,6 +102,22 @@ Tekst testowy (przerywniki, autopoprawka `handler znaczy parser`, identyfikator
   (`Dipsick` → `Deepseek`, `sonet` → `Sonnet`) i podzielił wypowiedź na akapity.
 - **`--quality`** — porównanie jakościowe na 12 trudnych transkrypcjach,
   uruchomione na wszystkich czterech gotowych kombinacjach provider/model.
+- **Menu tray przebudowane** — Provider / Model / Styl jako osobne podmenu
+  podpisane bieżącym wyborem, plus podmenu *Hotkey* i pozycja *Nazwy wlasne...*.
+  Wybór modelu DeepSeeka (flash/pro) istniał wcześniej, ale ginął w płaskiej
+  liście dziewięciu pozycji — użytkownik go nie znalazł. To była wada UI,
+  nie brak funkcji.
+
+## Czego NIE zweryfikowano na żywo (nowe w tej sesji)
+
+- **Słownik nazw własnych** — logika pokryta testami, ale **nie sprawdzona
+  nagraniem**. Nie wiem, o ile realnie poprawia rozpoznanie u tego użytkownika;
+  `initial_prompt` Whispera to mechanizm udokumentowany, nie mój pomiar.
+  To pierwsza rzecz do sprawdzenia: wpisz nazwy, podyktuj zdanie z „DeepSeek",
+  porównaj `raw_text` w `history.jsonl` przed i po.
+- **Zmiana hotkeya w locie** (`HotkeyListener.set_key`) — pokryta testami
+  jednostkowymi, nieklikana w prawdziwym trayu.
+- **Dialog *Nazwy wlasne...*** — wymaga dispatchera Tk, nietestowalny headless.
 
 ## Czego NIE zweryfikowano
 
@@ -152,6 +168,23 @@ wywołań, więc flash nie działał w ogóle. Z `thinking: {"type": "disabled"}
 nią — patrz pomiary wyżej. Odwrócenie kolejności w `registry.py` sprawi, że
 domyślny wybór CLI będzie tym, który regularnie przekracza limit 60 s.
 Użytkownik potwierdził ten wybór wprost.
+
+**Domyślny hotkey to prawy Ctrl, nie prawy Alt.** Oryginał miał prawy Alt i były
+do tego trzy mechanizmy obronne (brak przechwytywania, próg 300 ms, anulowanie na
+literę) — opisane w README i nadal działające. **Nie wystarczyły w praktyce:**
+użytkownik zgłosił, że przy pisaniu „ą" nagrywanie i tak się włącza. Próg łapie
+szybkie naciśnięcia, ale nie zawahanie. Przy klawiszu naciskanym kilkadziesiąt
+razy na akapit „prawie zawsze" jest za mało. `alt_r` zostało jako opcja — na
+układzie *Polski (214)* problemu nie ma. To zmiana wynikająca z użytkowania,
+nie z pomiaru; nie cofaj jej bez rozmowy z użytkownikiem.
+
+**Słownik nazw własnych idzie w DWA miejsca, nie w jedno.** `transcription.vocabulary`
+→ `initial_prompt` Whispera **oraz** sekcja w prompcie czyszczenia
+(`vocabulary.py`). Kuszące jest uprościć to do jednego; nie rób tego. Sam priming
+czasem nie zadziała, a sama naprawa po fakcie zostawia przekręcony tekst
+w `history.jsonl` i nie działa przy wyłączonym czyszczeniu. Sekcja promptu ma
+jawny zakaz dopisywania nazw z listy — bez niego model wstawia je tam, gdzie ich
+nie było.
 
 **Domyślny model DeepSeeka to Flash — na wyraźne życzenie użytkownika.** Powód,
 który podał (Pro wolniejszy), **nie potwierdził się w pomiarach**: Pro wyszedł

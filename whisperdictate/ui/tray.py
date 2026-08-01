@@ -20,6 +20,7 @@ from ..config import ENHANCEMENT_PROMPTS, ENHANCEMENT_PROVIDERS, LANGUAGES, MODE
 from ..controller import DictationController, State
 from ..enhance import PROVIDERS as PROVIDER_SPECS
 from ..enhance.prompts import PROMPT_LABELS
+from ..hotkey import DEFAULT_KEY, MENU_TRIGGERS
 
 log = logging.getLogger(__name__)
 
@@ -146,6 +147,8 @@ class Tray:
             item("Jezyk", pystray.Menu(*self._language_items())),
             item("Model", pystray.Menu(*self._model_items())),
             item("Mikrofon", pystray.Menu(*self._device_items())),
+            item(lambda _: f"Hotkey: {self._hotkey_label()}",
+                 pystray.Menu(*self._hotkey_items())),
             item("Czyszczenie tekstu", pystray.Menu(*self._enhancement_items())),
             pystray.Menu.SEPARATOR,
             item(
@@ -187,6 +190,20 @@ class Tray:
             )
 
         return [make(name) for name in MODEL_CHOICES]
+
+    def _hotkey_items(self) -> list[pystray.MenuItem]:
+        """Push-to-talk key. See MENU_TRIGGERS for why right Ctrl leads."""
+        return [
+            self._radio("hotkey.key", key, label, self.controller.set_hotkey_key)
+            for key, label in MENU_TRIGGERS
+        ]
+
+    def _hotkey_label(self) -> str:
+        key = str(self.config.get("hotkey.key", DEFAULT_KEY))
+        for name, label in MENU_TRIGGERS:
+            if name == key:
+                return label.split(" (")[0].split(" - ")[0]
+        return key  # an F-key set by hand in the config
 
     def _device_items(self) -> list[pystray.MenuItem]:
         """Microphone picker, built from the cached device list.
@@ -260,11 +277,19 @@ class Tray:
 
         if self._dispatcher is not None:
             items.append(pystray.Menu.SEPARATOR)
+            items.append(item("Nazwy wlasne...", self._open_vocabulary))
             for provider_key in ENHANCEMENT_PROVIDERS:
                 if PROVIDER_SPECS[provider_key].env_var is None:
                     continue  # the CLI needs no key
                 items.append(self._api_key_entry(provider_key))
         return items
+
+    def _open_vocabulary(self) -> None:
+        from . import dialogs
+
+        self._dispatcher.call(
+            lambda: dialogs.edit_vocabulary(self._dispatcher.root, self.controller)
+        )
 
     def _radio(self, dotted: str, value: str, label: str, setter) -> pystray.MenuItem:  # noqa: ANN001
         def select() -> None:

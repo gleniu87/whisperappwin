@@ -10,6 +10,7 @@ import unittest
 
 from pynput.keyboard import Key, KeyCode
 
+from whisperdictate import hotkey
 from whisperdictate.hotkey import HotkeyListener
 
 THRESHOLD_MS = 40
@@ -164,9 +165,53 @@ class PauseTest(unittest.TestCase):
 
 
 class ConfigurationTest(unittest.TestCase):
-    def test_unknown_key_falls_back_to_alt_r(self):
+    def test_unknown_key_falls_back_to_the_default(self):
         listener, _ = make_listener(key="nonexistent")
+        self.assertIn(Key.ctrl_r, listener.trigger_keys)
+        self.assertEqual(listener.key_name, hotkey.DEFAULT_KEY)
+
+    def test_the_default_is_right_ctrl_not_right_alt(self):
+        """Right Alt is AltGr on a Polish layout — every "ą" hits the trigger."""
+        self.assertEqual(hotkey.DEFAULT_KEY, "ctrl_r")
+        listener, _ = make_listener(key=hotkey.DEFAULT_KEY)
+        self.assertNotIn(Key.alt_r, listener.trigger_keys)
+
+
+class KeySwitchTest(unittest.TestCase):
+    """Changing the trigger on a running listener, without restarting the hook."""
+
+    def test_new_key_triggers_after_the_switch(self):
+        listener, calls = make_listener(key="alt_r")
+        self.assertTrue(listener.set_key("ctrl_r"))
+        listener._on_press(Key.ctrl_r)
+        listener._threshold_reached()
+        listener._on_release(Key.ctrl_r)
+        self.assertEqual(calls.events, ["start", "stop"])
+
+    def test_old_key_goes_quiet_after_the_switch(self):
+        listener, calls = make_listener(key="alt_r")
+        listener.set_key("ctrl_r")
+        listener._on_press(Key.alt_r)
+        listener._threshold_reached()
+        listener._on_release(Key.alt_r)
+        self.assertEqual(calls.events, [])
+
+    def test_unknown_key_is_rejected_and_changes_nothing(self):
+        listener, _ = make_listener(key="alt_r")
+        self.assertFalse(listener.set_key("nonexistent"))
+        self.assertEqual(listener.key_name, "alt_r")
         self.assertIn(Key.alt_r, listener.trigger_keys)
+
+    def test_switching_mid_recording_cancels_it(self):
+        """Releasing the old key must not stop a recording it no longer owns."""
+        listener, calls = make_listener(key="alt_r")
+        listener._on_press(Key.alt_r)
+        listener._threshold_reached()
+        self.assertEqual(calls.events, ["start"])
+        listener.set_key("ctrl_r")
+        self.assertEqual(calls.events, ["start", "cancel"])
+        listener._on_release(Key.alt_r)
+        self.assertEqual(calls.events, ["start", "cancel"])
 
     def test_unknown_mode_falls_back_to_hold(self):
         listener, _ = make_listener(mode="sideways")

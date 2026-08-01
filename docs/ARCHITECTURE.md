@@ -75,7 +75,7 @@ przez inną aplikację, transkrypcja jest już zapisana i da się ją odzyskać.
 | `config.py` | TOML z dostępem `get("sekcja.klucz")`, walidacja, atomowy zapis |
 | `paths.py` | lokalizacje w `%APPDATA%` / `%LOCALAPPDATA%` |
 | `runtime_cuda.py` | rejestracja DLL-i z pakietów `nvidia-*-cu12` przed importem ctranslate2 |
-| `audio.py` | przechwytywanie z mikrofonu, resampling, miernik poziomu |
+| `audio.py` | wykrywanie i wybór mikrofonu, przechwytywanie, resampling, miernik poziomu |
 | `transcriber.py` | leniwe ładowanie modelu, CUDA z fallbackiem na CPU |
 | `hotkey.py` | detekcja gestu prawy Alt, próg przytrzymania, ochrona AltGr |
 | `output.py` | schowek, zwalnianie zablokowanych modyfikatorów, Ctrl+V |
@@ -122,6 +122,34 @@ się jako „inny klawisz", hotkey na prawym Alcie nie wystrzeliłby ani razu.
 lista plików, przepada. Zachowanie pełnej zawartości wymagałoby przechwycenia
 wszystkich formatów łącznie z opóźnionym renderowaniem — nieproporcjonalnie dużo
 kodu jak na ten zysk. Alternatywa dla wymagających: `output.restore_clipboard = false`.
+
+**Menu mikrofonów pokazuje tylko WASAPI.**
+Windows wystawia ten sam mikrofon przez cztery host API PortAudio. Na maszynie
+testowej dawało to 26 pozycji na 3 fizyczne urządzenia. MME ucina nazwy na 31
+znakach (`Mikrofon (Virtual Desktop Audio` — bez nawiasu zamykającego), WDM-KS
+rozbija urządzenie wielokanałowe na wpisy per para kanałów, a WASAPI daje jeden
+czysty wpis z prawdziwą częstotliwością. Rozwiązywanie nazwy też przeszukuje
+najpierw WASAPI, żeby zapisana nazwa nie trafiła po cichu na gorszy wpis MME
+tego samego mikrofonu. `--list-devices --all` pokazuje pełną listę.
+
+**Urządzenie zapisywane po nazwie, nie po indeksie.**
+Indeksy PortAudio przesuwają się przy każdej zmianie sprzętu. Indeks zapisany
+dziś jutro wskazuje inny mikrofon — cicha awaria, która wygląda jak zepsuta
+aplikacja.
+
+**`refresh_devices()` restartuje PortAudio.**
+Lista urządzeń jest migawką z momentu inicjalizacji, więc mikrofon podłączony
+później jest niewidoczny. Restart jest bezpieczny tylko bez otwartego strumienia,
+dlatego woła się go z menu (blokowane w trakcie nagrywania) i raz przy nieudanym
+rozwiązaniu nazwy — czyli dokładnie w scenariuszu „odłączyłem kamerkę".
+
+**Akcje menu pystray to domknięcia, nigdy `lambda x=wartosc:`.**
+pystray wybiera sposób wywołania akcji na podstawie `__code__.co_argcount`: 0 =
+wywołaj bez argumentów, 1 = podaj `Icon`. Argument domyślny **wlicza się** do tej
+liczby, więc idiom late-bindingu `lambda n=device.name: ...` dostaje obiekt `Icon`
+zamiast nazwy. Predykaty `checked` są odporne (pystray woła je z jednym
+argumentem, więc drugi bierze wartość domyślną), ale akcje nie. Pilnuje tego
+`tests/test_tray_menu.py`.
 
 **Model ładowany z wyprzedzeniem w tle.**
 Konstrukcja `WhisperModel` to sekundy. Ładowanie przy pierwszym dyktowaniu

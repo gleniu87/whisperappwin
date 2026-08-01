@@ -109,15 +109,23 @@ def build_recorder(config: Config) -> Recorder:
 # ------------------------------------------------------------ subcommands
 
 
-def cmd_list_devices() -> int:
-    devices = list_input_devices()
+def cmd_list_devices(*, all_host_apis: bool = False) -> int:
+    devices = list_input_devices(all_host_apis=all_host_apis)
     if not devices:
         print("Nie znaleziono zadnego urzadzenia wejsciowego audio.")
         return 1
+
     print("Dostepne mikrofony:")
     for device in devices:
         print(f"  {device}")
-    print("\nWpisz indeks lub fragment nazwy jako audio.device w config.toml.")
+
+    if not all_host_apis:
+        total = len(list_input_devices(all_host_apis=True))
+        hidden = total - len(devices)
+        if hidden > 0:
+            print(f"\nUkryto {hidden} duplikatow z MME/DirectSound/WDM-KS. Pelna lista: --list-devices --all")
+
+    print("\nWybierz mikrofon z menu tray, albo wpisz nazwe jako audio.device w config.toml.")
     return 0
 
 
@@ -182,7 +190,11 @@ def cmd_record(config: Config, seconds: float) -> int:
     except AudioError as exc:
         print(f"BLAD: {exc}")
         return 1
+    if recorder.fallback_note:
+        print(f"UWAGA: {recorder.fallback_note}")
 
+    device = config.get("audio.device") or "domyslny systemowy"
+    print(f"Mikrofon: {device}")
     print(f"Mow teraz - nagrywam {seconds:.0f} s...")
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -301,10 +313,18 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("-v", "--verbose", action="store_true", help="logowanie DEBUG")
     parser.add_argument("--list-devices", action="store_true", help="wypisz mikrofony i zakoncz")
+    parser.add_argument(
+        "--all", action="store_true",
+        help="z --list-devices: pokaz tez duplikaty z MME/DirectSound/WDM-KS",
+    )
     parser.add_argument("--check", action="store_true", help="diagnostyka srodowiska (CUDA, audio, model)")
     parser.add_argument(
         "--record", type=float, metavar="SEKUNDY",
         help="nagraj N sekund, wypisz transkrypcje i zakoncz (test bez hotkeya)",
+    )
+    parser.add_argument(
+        "--device", metavar="NAZWA",
+        help="z --record: uzyj tego mikrofonu zamiast tego z konfiguracji",
     )
     return parser.parse_args(argv)
 
@@ -315,10 +335,12 @@ def main(argv: list[str] | None = None) -> int:
     config = Config.load(paths.config_path())
 
     if args.list_devices:
-        return cmd_list_devices()
+        return cmd_list_devices(all_host_apis=args.all)
     if args.check:
         return cmd_check(config)
     if args.record is not None:
+        if args.device:
+            config.set("audio.device", args.device, save=False)
         return cmd_record(config, args.record)
     return run_app(config)
 

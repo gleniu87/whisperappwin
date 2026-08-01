@@ -48,8 +48,26 @@ Pierwsze uruchomienie pobiera model (~1.6 GB) z Hugging Face do
 **Przytrzymaj prawy Alt, mów, puść.** Tekst pojawi się w aktywnym oknie.
 
 Ikona w zasobniku pokazuje stan kolorem — szary (gotowy), czerwony (nagrywanie),
-niebieski (transkrypcja), żółty (ładowanie modelu). Z jej menu przełączysz język i
-model, wstrzymasz dyktowanie i otworzysz konfigurację, historię lub log.
+niebieski (transkrypcja), żółty (ładowanie modelu). Z jej menu przełączysz język,
+model i **mikrofon**, wstrzymasz dyktowanie i otworzysz konfigurację, historię lub log.
+
+### Wybór mikrofonu
+
+Menu **Mikrofon** pokazuje urządzenia WASAPI — po jednym na fizyczny sprzęt.
+Windows wystawia ten sam mikrofon przez cztery API (MME, DirectSound, WASAPI,
+WDM-KS), więc pełna lista PortAudio potrafi mieć 25 pozycji na 3 mikrofony;
+WASAPI to ta z pełnymi nazwami i prawdziwą częstotliwością próbkowania.
+
+Wybór zapisuje się **po nazwie, nie po indeksie** — indeksy PortAudio przesuwają
+się przy każdym podłączeniu sprzętu, więc zapisany dziś numer jutro wskazuje inne
+urządzenie.
+
+Odłączenie wybranego mikrofonu (np. kamerki USB) nie psuje aplikacji: przy
+następnym dyktowaniu przeskanuje sprzęt ponownie, a jeśli urządzenia nadal nie ma
+— nagra z domyślnego systemowego i powie Ci o tym powiadomieniem. Urządzenie
+zostaje zaznaczone w menu jako *(niepodlaczony)*, żeby było widać, na co aplikacja
+czeka. **Odswiez liste** wymusza ponowne wykrycie sprzętu (PortAudio buforuje listę
+przy starcie, więc świeżo podłączony mikrofon inaczej się nie pojawi).
 
 ### Prawy Alt a polskie znaki
 
@@ -83,7 +101,7 @@ Najczęściej zmieniane:
 | `transcription.model` | `"large-v3-turbo"` | mniejszy = szybszy, mniej dokładny |
 | `hotkey.key` | `"alt_r"` | `alt_l`, `ctrl_r`, `f1`–`f20`, `scroll_lock`, `pause` |
 | `hotkey.mode` | `"hold"` | `hold` albo `toggle` |
-| `audio.device` | `null` | indeks lub fragment nazwy mikrofonu |
+| `audio.device` | `null` | nazwa mikrofonu; ustawiana z menu tray |
 | `output.auto_paste` | `true` | `false` = tylko schowek, bez Ctrl+V |
 | `[replacements]` | pusta | słownik zamian, np. `"kubernetes" = "Kubernetes"` |
 
@@ -93,10 +111,12 @@ nie przetrwają. Notatki trzymaj w `config.example.toml`.
 ## Diagnostyka
 
 ```powershell
-.\run.ps1 -Check          # CUDA, mikrofony, hotkey, ładowanie modelu
-.\run.ps1 -ListDevices    # lista mikrofonów z indeksami
-.\run.ps1 -Record 5       # nagraj 5 s i wypisz transkrypcję (bez hotkeya)
-.\run.ps1 -Trace          # logowanie DEBUG
+.\run.ps1 -Check                      # CUDA, mikrofony, hotkey, ładowanie modelu
+.\run.ps1 -ListDevices                # mikrofony (WASAPI)
+.\run.ps1 -ListDevices -All           # + duplikaty z MME/DirectSound/WDM-KS
+.\run.ps1 -Record 5                   # nagraj 5 s i wypisz transkrypcję (bez hotkeya)
+.\run.ps1 -Record 5 -Device "Anker"   # ...z konkretnego mikrofonu, bez zmiany configu
+.\run.ps1 -Trace                      # logowanie DEBUG
 ```
 
 Log: `%APPDATA%\WhisperDictateWin\whisperdictate.log`.

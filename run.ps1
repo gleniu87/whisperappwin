@@ -31,7 +31,9 @@ param(
     [switch]$Hidden,
     [switch]$Check,
     [switch]$ListDevices,
+    [switch]$All,
     [double]$Record = 0,
+    [string]$Device,
     [switch]$Trace
 )
 
@@ -48,7 +50,9 @@ $appArgs = @("-m", "whisperdictate")
 if ($Trace)       { $appArgs += "--verbose" }
 if ($Check)       { $appArgs += "--check" }
 if ($ListDevices) { $appArgs += "--list-devices" }
+if ($All)         { $appArgs += "--all" }
 if ($Record -gt 0){ $appArgs += @("--record", $Record) }
+if ($Device)      { $appArgs += @("--device", $Device) }
 
 # The package is imported from the repo root, so run from there regardless of
 # where the caller happened to be.

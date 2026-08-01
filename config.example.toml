@@ -58,8 +58,16 @@ vad_filter = true
 initial_prompt = ""
 
 [audio]
-# Input device. null = Windows default. Use a substring of the device name
-# ("Yeti", "Realtek") or a numeric index from `python -m whisperdictate --list-devices`.
+# Input device. null = whatever Windows considers the default input.
+#
+# Normally you pick this from the tray menu (Mikrofon), which writes the name
+# here. Names, not indices: PortAudio renumbers devices whenever hardware is
+# added or removed, so an index saved today points somewhere else tomorrow.
+# A substring is enough ("Anker", "Yeti"). An integer index also works, but only
+# until the next time you plug something in.
+#
+# If the named device is missing when you dictate (webcam unplugged), the app
+# re-scans, then falls back to the system default and tells you it did.
 device = null
 
 # Recordings shorter than this are discarded as accidental key taps.

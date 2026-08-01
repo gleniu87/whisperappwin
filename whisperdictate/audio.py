@@ -18,6 +18,13 @@ log = logging.getLogger(__name__)
 
 TARGET_RATE = 16_000
 
+# Windows exposes the same physical microphone through four host APIs. WASAPI is
+# the one worth showing: it is the modern path, reports the true sample rate, and
+# gives one entry per device with an untruncated name. MME truncates names at 31
+# characters ("Mikrofon (Virtual Desktop Audio" - note the missing bracket) and
+# WDM-KS splits a multi-channel device into one entry per channel pair.
+_PREFERRED_HOST_API = "Windows WASAPI"
+
 
 class AudioError(RuntimeError):
     """Recording could not start or produced nothing usable."""
@@ -29,18 +36,44 @@ class DeviceInfo:
     name: str
     channels: int
     default_samplerate: float
+    host_api: str
     is_default: bool
 
     def __str__(self) -> str:
         marker = " (domyslne)" if self.is_default else ""
-        return f"[{self.index}] {self.name} - {self.channels} kanal(y) @ {self.default_samplerate:.0f} Hz{marker}"
+        return (
+            f"[{self.index}] {self.name} - {self.channels} kanal(y) "
+            f"@ {self.default_samplerate:.0f} Hz [{self.host_api}]{marker}"
+        )
 
 
-def list_input_devices() -> list[DeviceInfo]:
+def refresh_devices() -> None:
+    """Re-enumerate audio hardware.
+
+    PortAudio snapshots the device list when it initialises, so a microphone
+    plugged in (or unplugged) afterwards is invisible until it is restarted.
+    Only safe with no stream open - the caller is responsible for that.
+    """
     try:
+        sd._terminate()
+        sd._initialize()
+        log.debug("Lista urzadzen audio odswiezona")
+    except Exception as exc:  # noqa: BLE001 - PortAudio internals
+        log.warning("Nie moge odswiezyc listy urzadzen audio: %s", exc)
+
+
+def list_input_devices(*, all_host_apis: bool = False) -> list[DeviceInfo]:
+    """Input devices, WASAPI-only by default.
+
+    Pass all_host_apis=True for diagnostics, where seeing every duplicate is
+    the point.
+    """
+    try:
+        host_apis = sd.query_hostapis()
         default_index = sd.default.device[0]
-    except (TypeError, IndexError):
-        default_index = None
+    except Exception as exc:  # noqa: BLE001 - PortAudio not initialised
+        log.warning("Nie moge odczytac listy urzadzen audio: %s", exc)
+        return []
 
     devices = []
     for index, dev in enumerate(sd.query_devices()):
@@ -52,34 +85,41 @@ def list_input_devices() -> list[DeviceInfo]:
                 name=dev["name"],
                 channels=dev["max_input_channels"],
                 default_samplerate=dev["default_samplerate"],
+                host_api=host_apis[dev["hostapi"]]["name"],
                 is_default=index == default_index,
             )
         )
-    return devices
+
+    if all_host_apis:
+        return devices
+    preferred = [d for d in devices if d.host_api == _PREFERRED_HOST_API]
+    return preferred or devices
 
 
-def resolve_device(spec: int | str | None) -> int | None:
-    """Turn a config value into a PortAudio device index.
+def find_device(spec: int | str | None) -> DeviceInfo | None:
+    """Resolve a config value to a device, or None for the system default.
 
-    Accepts None (system default), an index, or a case-insensitive substring of
-    the device name. Falls back to the default device with a warning rather
-    than refusing to start - a renamed USB mic should not brick dictation.
+    Accepts an index or a case-insensitive name (exact match preferred over
+    substring). Names are searched in the WASAPI list first so a stored name
+    does not silently resolve to the same microphone's inferior MME entry.
     """
     if spec is None:
         return None
-    devices = list_input_devices()
+
     if isinstance(spec, int) and not isinstance(spec, bool):
-        if any(d.index == spec for d in devices):
-            return spec
-        log.warning("Urzadzenie audio o indeksie %s nie istnieje - uzywam domyslnego", spec)
+        for device in list_input_devices(all_host_apis=True):
+            if device.index == spec:
+                return device
         return None
 
     needle = str(spec).casefold()
-    for dev in devices:
-        if needle in dev.name.casefold():
-            log.info("Urzadzenie audio %r -> %s", spec, dev)
-            return dev.index
-    log.warning("Nie znaleziono urzadzenia audio pasujacego do %r - uzywam domyslnego", spec)
+    for candidates in (list_input_devices(), list_input_devices(all_host_apis=True)):
+        for device in candidates:
+            if device.name.casefold() == needle:
+                return device
+        for device in candidates:
+            if needle in device.name.casefold():
+                return device
     return None
 
 
@@ -98,11 +138,25 @@ class Recorder:
         self._overflowed = False
         self._truncated = False
 
+        #: Set by start() when the configured device could not be honoured, so
+        #: the caller can tell the user instead of silently recording silence
+        #: from whatever Windows considers the default.
+        self.fallback_note: str | None = None
+
     # -- lifecycle ------------------------------------------------------
 
     @property
     def is_recording(self) -> bool:
         return self._stream is not None
+
+    @property
+    def device_spec(self) -> int | str | None:
+        return self._device_spec
+
+    @device_spec.setter
+    def device_spec(self, spec: int | str | None) -> None:
+        """Takes effect on the next start(); an in-flight recording is untouched."""
+        self._device_spec = spec
 
     @property
     def level(self) -> float:
@@ -119,11 +173,33 @@ class Recorder:
         self._level = 0.0
         self._overflowed = False
         self._truncated = False
+        self.fallback_note = None
 
-        device = resolve_device(self._device_spec)
-        self._stream, self._capture_rate = self._open_stream(device)
+        index = self._resolve_device_index()
+        self._stream, self._capture_rate = self._open_stream(index)
         self._stream.start()
         log.debug("Nagrywanie wystartowalo @ %d Hz", self._capture_rate)
+
+    def _resolve_device_index(self) -> int | None:
+        """Index of the configured device, or None to let Windows choose."""
+        spec = self._device_spec
+        if spec is None:
+            return None
+
+        device = find_device(spec)
+        if device is None:
+            # The usual cause is a USB microphone unplugged since startup, and
+            # PortAudio caches its device list - so re-enumerate before giving up.
+            refresh_devices()
+            device = find_device(spec)
+
+        if device is None:
+            self.fallback_note = f"Nie znaleziono mikrofonu {spec!r} - nagrywam z domyslnego systemowego"
+            log.warning("%s", self.fallback_note)
+            return None
+
+        log.debug("Mikrofon %r -> %s", spec, device)
+        return device.index
 
     def stop(self) -> np.ndarray | None:
         """Stop and return mono float32 audio at 16 kHz, or None if nothing was captured."""

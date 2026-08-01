@@ -123,6 +123,10 @@ class DictationController:
                 return
         self.sounds.play("start")
         self._set_state(State.RECORDING)
+        if self.recorder.fallback_note:
+            # Recording from the wrong microphone usually means recording silence.
+            # Say so now rather than letting the user wonder why nothing appears.
+            self._notify(self.recorder.fallback_note, error=True)
 
     def on_stop(self) -> None:
         with self._lock:
@@ -164,6 +168,13 @@ class DictationController:
     def set_language(self, language: str) -> None:
         self.config.set("transcription.language", language)
         log.info("Jezyk: %s", language)
+        self._set_state(self._state)
+
+    def set_audio_device(self, spec: int | str | None) -> None:
+        """Choose the input device. Applies from the next recording onwards."""
+        self.config.set("audio.device", spec)
+        self.recorder.device_spec = spec
+        log.info("Mikrofon: %s", spec if spec is not None else "domyslny systemowy")
         self._set_state(self._state)
 
     def set_model(self, model: str) -> None:
@@ -216,10 +227,12 @@ class DictationController:
             elapsed_seconds=round(result.elapsed_seconds, 2),
         )
 
-        try:
-            # Imported lazily: pulls in pywin32 + pynput, neither needed for --check.
-            from .output import ClipboardError, deliver
+        # Imported lazily (pulls in pywin32 + pynput, neither needed for --check)
+        # but outside the try: an ImportError here must not be caught by an
+        # `except ClipboardError` whose name would not even be bound yet.
+        from .output import ClipboardError, deliver
 
+        try:
             deliver(
                 text,
                 auto_paste=bool(self.config.get("output.auto_paste", True)),

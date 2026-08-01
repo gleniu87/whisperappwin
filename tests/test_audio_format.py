@@ -1,31 +1,102 @@
-"""Stream format negotiation.
+"""Stream format and host-API negotiation.
 
 Regression cover for a failure seen in the wild on a WASAPI conference mic:
 
     PortAudioError: Error starting stream:
       AUDCLNT_E_UNSUPPORTED_FORMAT [Windows WASAPI error -2004287480]
 
-WASAPI validates a format lazily, so InputStream(...) succeeds and .start()
-is what fails. If starting is not part of the attempt, the error escapes as a
-raw PortAudioError instead of a handled AudioError - and the fallback ladder
-never runs.
+Three facts measured on real hardware shape the expected behaviour:
+
+* WASAPI accepts its mix format (48 kHz) and rejects 16 kHz and 44.1 kHz
+  outright, at open.
+* WASAPI intermittently rejects even 48 kHz, at start, while another process
+  reconfigures the device. The same request succeeds a minute later.
+* DirectSound and MME expose the same physical microphone and accept every
+  rate and channel count tried.
+
+So recovery means crossing to another host API, not retrying one forever.
 """
 
 import unittest
 from unittest import mock
 
+import numpy as np
 import sounddevice as sd
 
 from whisperdictate import audio
-from whisperdictate.audio import AudioError, Recorder
+from whisperdictate.audio import AudioError, DeviceInfo, Recorder, _formats_for, _same_physical_device
+
+WASAPI_ANKER = DeviceInfo(25, "Mikrofon (Anker PowerConf C200)", 2, 48000.0, "Windows WASAPI", False)
+DSOUND_ANKER = DeviceInfo(12, "Mikrofon (Anker PowerConf C200)", 4, 44100.0, "Windows DirectSound", False)
+MME_ANKER = DeviceInfo(2, "Mikrofon (Anker PowerConf C200)", 4, 44100.0, "MME", False)
+WDMKS_ANKER = DeviceInfo(41, "Mikrofon 1 (Anker PowerConf C200)", 2, 48000.0, "Windows WDM-KS", False)
+WASAPI_INTEL = DeviceInfo(26, "Zestaw mikrofonow (Technologia Intel Smart Sound)", 2, 48000.0, "Windows WASAPI", False)
+MME_INTEL = DeviceInfo(3, "Zestaw mikrofonow (Technologia ", 4, 44100.0, "MME", False)
+
+ALL_DEVICES = [MME_ANKER, MME_INTEL, DSOUND_ANKER, WASAPI_ANKER, WASAPI_INTEL, WDMKS_ANKER]
+
+
+class SiblingMatchingTest(unittest.TestCase):
+    def test_truncated_mme_name_matches_full_wasapi_name(self):
+        """MME cuts names at 31 characters; it is still the same microphone."""
+        self.assertTrue(
+            _same_physical_device(
+                "Zestaw mikrofonow (Technologia ",
+                "Zestaw mikrofonow (Technologia Intel Smart Sound)",
+            )
+        )
+
+    def test_different_devices_do_not_match(self):
+        self.assertFalse(_same_physical_device("Mikrofon (Anker PowerConf C200)", "Miks stereo (Realtek)"))
+
+    def test_short_names_do_not_match_promiscuously(self):
+        self.assertFalse(_same_physical_device("Mic", "Microphone Array"))
+
+    def test_wdmks_per_channel_entry_is_not_a_sibling(self):
+        """'Mikrofon 1 (Anker...)' is a channel pair, not the device."""
+        self.assertFalse(
+            _same_physical_device("Mikrofon (Anker PowerConf C200)", "Mikrofon 1 (Anker PowerConf C200)")
+        )
+
+
+class SiblingOrderingTest(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(audio, "list_input_devices", lambda **_: ALL_DEVICES)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_orders_wasapi_then_directsound_then_mme(self):
+        order = [(d.index, d.host_api) for d in audio.sibling_devices(WASAPI_ANKER)]
+        self.assertEqual(order, [(25, "Windows WASAPI"), (12, "Windows DirectSound"), (2, "MME")])
+
+    def test_excludes_wdmks(self):
+        self.assertNotIn(41, [d.index for d in audio.sibling_devices(WASAPI_ANKER)])
+
+    def test_resolved_device_leads_even_from_a_lower_ranked_api(self):
+        order = [d.index for d in audio.sibling_devices(MME_ANKER)]
+        self.assertEqual(order[0], 2)
+        self.assertEqual(sorted(order), [2, 12, 25])
+
+
+class FormatLadderTest(unittest.TestCase):
+    def test_native_rate_leads_then_stereo_then_16k(self):
+        self.assertEqual(
+            _formats_for(25, 48000, 2),
+            [(25, 48000, 1), (25, 48000, 2), (25, 16000, 1)],
+        )
+
+    def test_mono_device_gets_no_stereo_candidate(self):
+        self.assertEqual(_formats_for(27, 48000, 1), [(27, 48000, 1), (27, 16000, 1)])
+
+    def test_native_16k_device_is_not_offered_16k_twice(self):
+        self.assertEqual(_formats_for(30, 16000, 1), [(30, 16000, 1)])
 
 
 class FakeStream:
-    """Stands in for sd.InputStream, failing at construction or at start()."""
-
     def __init__(self, *, fail_on_start=False, **kwargs):
         self.samplerate = kwargs["samplerate"]
         self.channels = kwargs["channels"]
+        self.device = kwargs["device"]
         self._fail_on_start = fail_on_start
         self.started = False
         self.closed = False
@@ -39,126 +110,140 @@ class FakeStream:
         self.closed = True
 
 
-class FormatNegotiationTest(unittest.TestCase):
+class OpenStreamTest(unittest.TestCase):
+    """Mirrors the measured hardware: WASAPI is 48 kHz-only, the rest accept anything."""
+
     def setUp(self):
-        # A stereo 48 kHz device, like the Anker PowerConf over WASAPI.
-        patcher = mock.patch.object(
-            audio.sd, "query_devices",
-            lambda *_a, **_k: {"default_samplerate": 48000.0, "max_input_channels": 2},
-        )
+        for target in (audio, ):
+            patcher = mock.patch.object(target, "list_input_devices", lambda **_: ALL_DEVICES)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(audio, "find_device", lambda _: WASAPI_ANKER)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Keep the retry pass instant.
+        patcher = mock.patch.object(audio.time, "sleep", lambda _: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
         self.attempts = []
+        self.opened = []
 
-    def install(self, accept):
-        """Route InputStream construction through `accept(rate, channels) -> str`.
-
-        Returns "ok", "open" (fail at construction) or "start" (fail at start).
-        """
+    def install(self, verdict):
+        """verdict(device, rate, channels) -> "ok" | "open" | "start"."""
 
         def factory(**kwargs):
-            rate, channels = kwargs["samplerate"], kwargs["channels"]
-            self.attempts.append((rate, channels))
-            verdict = accept(rate, channels)
-            if verdict == "open":
+            key = (kwargs["device"], kwargs["samplerate"], kwargs["channels"])
+            self.attempts.append(key)
+            result = verdict(*key)
+            if result == "open":
                 raise sd.PortAudioError("Error opening InputStream: Invalid sample rate")
-            return FakeStream(fail_on_start=(verdict == "start"), **kwargs)
+            stream = FakeStream(fail_on_start=(result == "start"), **kwargs)
+            self.opened.append(stream)
+            return stream
 
         patcher = mock.patch.object(audio.sd, "InputStream", factory)
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_prefers_16k_mono_when_the_device_accepts_it(self):
-        self.install(lambda r, c: "ok")
-        stream, rate, channels = Recorder()._open_stream(25)
-        self.assertEqual((rate, channels), (16000, 1))
-        self.assertTrue(stream.started)
-        self.assertEqual(self.attempts, [(16000, 1)])
+    def recorder(self):
+        return Recorder(device="Anker")
 
-    def test_falls_back_to_native_rate_when_16k_is_rejected(self):
-        self.install(lambda r, c: "open" if r == 16000 else "ok")
-        _, rate, channels = Recorder()._open_stream(25)
+    def test_happy_path_takes_wasapi_native_mono(self):
+        self.install(lambda d, r, c: "ok")
+        _, rate, channels = self.recorder()._open_stream()
         self.assertEqual((rate, channels), (48000, 1))
+        self.assertEqual(self.attempts, [(25, 48000, 1)])
 
-    def test_failure_at_start_falls_through_instead_of_escaping(self):
-        """The exact bug: mono opens fine, then start() rejects it."""
-        self.install(lambda r, c: "start" if c == 1 else "ok")
-        _, rate, channels = Recorder()._open_stream(25)
-        self.assertEqual(channels, 2)
+    def test_wasapi_rejecting_16k_is_never_asked_for_it_first(self):
+        """Leading with 16 kHz would waste the attempt most likely to succeed."""
+        self.install(lambda d, r, c: "open" if (d == 25 and r != 48000) else "ok")
+        _, rate, _ = self.recorder()._open_stream()
         self.assertEqual(rate, 48000)
+        self.assertEqual(self.attempts[0], (25, 48000, 1))
 
-    def test_stream_that_failed_to_start_is_closed(self):
-        opened = []
+    def test_falls_across_to_directsound_when_wasapi_fails_at_start(self):
+        """The real-world failure: WASAPI opens then refuses to start."""
+        self.install(lambda d, r, c: "start" if d == 25 else "ok")
+        _, rate, channels = self.recorder()._open_stream()
+        self.assertEqual([a[0] for a in self.attempts][-1], 12)
+        self.assertEqual((rate, channels), (44100, 1))
 
-        def factory(**kwargs):
-            stream = FakeStream(fail_on_start=(kwargs["channels"] == 1), **kwargs)
-            opened.append(stream)
-            return stream
+    def test_falls_through_to_mme_when_wasapi_and_directsound_both_fail(self):
+        self.install(lambda d, r, c: "ok" if d == 2 else "start")
+        _, rate, _ = self.recorder()._open_stream()
+        self.assertEqual(self.attempts[-1][0], 2)
+        self.assertEqual(rate, 44100)
 
-        with mock.patch.object(audio.sd, "InputStream", factory):
-            Recorder()._open_stream(25)
+    def test_streams_that_failed_to_start_are_closed(self):
+        self.install(lambda d, r, c: "start" if d == 25 else "ok")
+        self.recorder()._open_stream()
+        abandoned = [s for s in self.opened if not s.started]
+        self.assertTrue(abandoned)
+        self.assertTrue(all(s.closed for s in abandoned))
 
-        self.assertTrue(opened[0].closed, "porzucony strumien musi byc zamkniety")
+    def test_transient_failure_recovers_on_the_second_pass(self):
+        """Everything fails once, then the device settles - as observed in the log."""
+        state = {"pass_one": True}
 
-    def test_all_formats_rejected_raises_audio_error_listing_attempts(self):
-        self.install(lambda r, c: "start")
+        def verdict(device, rate, channels):
+            if state["pass_one"]:
+                return "start"
+            return "ok"
+
+        self.install(verdict)
+        recorder = self.recorder()
+        # Flip after the first full ladder is exhausted.
+        original = recorder._try_open
+        seen = []
+
+        def counting(index, samplerate, channels, failures):
+            seen.append(index)
+            if len(seen) == len(recorder._candidates(WASAPI_ANKER)):
+                state["pass_one"] = False
+            return original(index, samplerate, channels, failures)
+
+        recorder._try_open = counting
+        _, rate, _ = recorder._open_stream()
+        self.assertTrue(rate)
+
+    def test_total_failure_raises_audio_error_naming_every_device_tried(self):
+        self.install(lambda d, r, c: "start")
         with self.assertRaises(AudioError) as ctx:
-            Recorder()._open_stream(25)
+            self.recorder()._open_stream()
         message = str(ctx.exception)
-        self.assertIn("16000 Hz / 1 ch", message)
-        self.assertIn("48000 Hz / 2 ch", message)
+        for index in (25, 12, 2):
+            self.assertIn(f"[{index}]", message)
 
     def test_raw_portaudio_error_never_escapes(self):
-        """The controller only catches AudioError; anything else reaches the key hook."""
-        self.install(lambda r, c: "start")
+        """The controller only catches AudioError; anything else hits the key hook."""
+        self.install(lambda d, r, c: "start")
         with self.assertRaises(AudioError):
-            Recorder()._open_stream(25)
+            self.recorder()._open_stream()
 
-    def test_working_format_is_cached_and_tried_first(self):
-        self.install(lambda r, c: "start" if c == 1 else "ok")
-        recorder = Recorder()
-        recorder._open_stream(25)
-        first_pass = len(self.attempts)
-        self.assertGreater(first_pass, 1, "pierwsze przejscie ma isc po drabince")
+    def test_working_combination_is_cached_and_tried_first(self):
+        self.install(lambda d, r, c: "ok" if d == 2 else "start")
+        recorder = self.recorder()
+        recorder._open_stream()
+        self.assertGreater(len(self.attempts), 1)
 
         self.attempts.clear()
-        recorder._open_stream(25)
-        self.assertEqual(self.attempts, [(48000, 2)], "drugie przejscie ma trafic od razu")
-
-    def test_mono_device_never_offers_a_stereo_candidate(self):
-        with mock.patch.object(
-            audio.sd, "query_devices",
-            lambda *_a, **_k: {"default_samplerate": 44100.0, "max_input_channels": 1},
-        ):
-            candidates = Recorder()._candidate_formats(27)
-        self.assertEqual(candidates, [(16000, 1), (44100, 1)])
-
-    def test_unreadable_device_falls_back_to_a_sane_assumption(self):
-        with mock.patch.object(audio.sd, "query_devices", side_effect=sd.PortAudioError("gone")):
-            self.assertEqual(Recorder()._device_format(99), (48000, 2))
+        recorder._open_stream()
+        self.assertEqual(self.attempts, [(2, 44100, 1)])
 
 
 class DownmixTest(unittest.TestCase):
     def test_stereo_block_is_averaged_not_left_channel_only(self):
         """A quiet capsule on one channel must not halve the recorded level."""
-        import numpy as np
-
         recorder = Recorder()
         recorder._capture_rate = 48000
-        stereo = np.array([[0.0, 1.0], [0.0, 1.0]], dtype=np.float32)
-        recorder._callback(stereo, 2, None, None)
-
-        self.assertEqual(len(recorder._chunks), 1)
+        recorder._callback(np.array([[0.0, 1.0], [0.0, 1.0]], dtype=np.float32), 2, None, None)
         np.testing.assert_allclose(recorder._chunks[0], [0.5, 0.5])
 
     def test_mono_block_passes_through(self):
-        import numpy as np
-
         recorder = Recorder()
         recorder._capture_rate = 16000
-        mono = np.array([[0.25], [0.5]], dtype=np.float32)
-        recorder._callback(mono, 2, None, None)
-
+        recorder._callback(np.array([[0.25], [0.5]], dtype=np.float32), 2, None, None)
         np.testing.assert_allclose(recorder._chunks[0], [0.25, 0.5])
 
 

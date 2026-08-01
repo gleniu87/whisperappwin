@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,6 +25,25 @@ TARGET_RATE = 16_000
 # characters ("Mikrofon (Virtual Desktop Audio" - note the missing bracket) and
 # WDM-KS splits a multi-channel device into one entry per channel pair.
 _PREFERRED_HOST_API = "Windows WASAPI"
+
+# Fallback order when the preferred path refuses to open. WASAPI is strict: on a
+# typical USB conference microphone it accepts its mix format (48 kHz) and
+# nothing else, and it transiently returns AUDCLNT_E_UNSUPPORTED_FORMAT while
+# another process reconfigures the device. DirectSound and MME wrap the same
+# physical hardware, resample internally, and accept essentially any format -
+# worse latency, but they work when WASAPI will not.
+#
+# WDM-KS is excluded on purpose: it is exclusive-mode, mostly answers "Invalid
+# device", and splits a multi-capsule microphone into per-channel-pair entries.
+_FALLBACK_HOST_APIS = ("Windows WASAPI", "Windows DirectSound", "MME")
+
+# Shortest name prefix that may be treated as the same physical device. MME
+# truncates device names at 31 characters, so sibling entries are matched by
+# prefix rather than equality.
+_SIBLING_MIN_PREFIX = 8
+
+_RETRY_PASSES = 2
+_RETRY_DELAY_S = 0.25
 
 
 class AudioError(RuntimeError):
@@ -123,6 +143,36 @@ def find_device(spec: int | str | None) -> DeviceInfo | None:
     return None
 
 
+def _same_physical_device(a: str, b: str) -> bool:
+    """Whether two PortAudio entries plausibly wrap the same hardware.
+
+    Prefix comparison, not equality: MME truncates names at 31 characters, so
+    "Zestaw mikrofonow (Technologia " and the full WASAPI name are the same mic.
+    """
+    x, y = " ".join(a.split()).casefold(), " ".join(b.split()).casefold()
+    shorter, longer = (x, y) if len(x) <= len(y) else (y, x)
+    return len(shorter) >= _SIBLING_MIN_PREFIX and longer.startswith(shorter)
+
+
+def sibling_devices(device: DeviceInfo) -> list[DeviceInfo]:
+    """The same microphone as seen through each usable host API, best first.
+
+    This is what lets dictation survive WASAPI having a bad moment: the very
+    same hardware is still reachable through DirectSound and MME.
+    """
+    siblings = [
+        d
+        for d in list_input_devices(all_host_apis=True)
+        if d.host_api in _FALLBACK_HOST_APIS and _same_physical_device(d.name, device.name)
+    ]
+    siblings.sort(key=lambda d: (_FALLBACK_HOST_APIS.index(d.host_api), d.index))
+
+    # The explicitly resolved device leads, whatever its host API.
+    ordered = [d for d in siblings if d.index == device.index]
+    ordered += [d for d in siblings if d.index != device.index]
+    return ordered or [device]
+
+
 class Recorder:
     """One-shot recorder. Not reusable concurrently; the controller serialises calls."""
 
@@ -179,14 +229,13 @@ class Recorder:
         self._truncated = False
         self.fallback_note = None
 
-        index = self._resolve_device_index()
-        self._stream, self._capture_rate, self._capture_channels = self._open_stream(index)
+        self._stream, self._capture_rate, self._capture_channels = self._open_stream()
         log.debug(
             "Nagrywanie wystartowalo @ %d Hz, %d kanal(y)", self._capture_rate, self._capture_channels
         )
 
-    def _resolve_device_index(self) -> int | None:
-        """Index of the configured device, or None to let Windows choose."""
+    def _resolve_device(self) -> DeviceInfo | None:
+        """The configured microphone, or None to let Windows choose."""
         spec = self._device_spec
         if spec is None:
             return None
@@ -204,7 +253,11 @@ class Recorder:
             return None
 
         log.debug("Mikrofon %r -> %s", spec, device)
-        return device.index
+        return device
+
+    def _resolve_device_index(self) -> int | None:
+        device = self._resolve_device()
+        return device.index if device is not None else None
 
     def stop(self) -> np.ndarray | None:
         """Stop and return mono float32 audio at 16 kHz, or None if nothing was captured."""
@@ -235,70 +288,93 @@ class Recorder:
 
     # -- internals ------------------------------------------------------
 
-    def _open_stream(self, device: int | None) -> tuple[sd.InputStream, int, int]:
-        """Open and start a capture stream, trying formats until one works.
+    def _open_stream(self) -> tuple[sd.InputStream, int, int]:
+        """Open and start a capture stream, trying host APIs and formats until one works.
 
-        Two Windows realities drive this:
+        Three Windows realities drive the shape of this:
 
         * A format can be accepted at open and rejected at start. WASAPI
           validates lazily, so `InputStream(...)` succeeds and `.start()` then
           fails with AUDCLNT_E_UNSUPPORTED_FORMAT. Starting must be part of the
           attempt, or the failure escapes as a raw PortAudioError.
-        * A stereo device in shared mode may refuse a mono stream outright.
-          Asking for its native channel count and downmixing ourselves is the
-          reliable path.
+        * WASAPI accepts its mix format and nothing else, and refuses even that
+          while another process is reconfiguring the device. DirectSound and MME
+          expose the same hardware and accept almost anything, so falling across
+          host APIs recovers where retrying one of them forever cannot.
+        * The failure is often transient, so a second pass after a short pause
+          is worth more than a longer ladder.
 
-        The working combination is cached per device, so the fallback ladder is
-        walked once rather than on every dictation.
+        The winning combination is cached, so the ladder is walked once rather
+        than on every dictation.
         """
-        cached = self._format_cache.get(device)
-        candidates = self._candidate_formats(device)
-        if cached is not None:
+        primary = self._resolve_device()
+        candidates = self._candidates(primary)
+
+        cache_key = primary.index if primary is not None else None
+        cached = self._format_cache.get(cache_key)
+        if cached is not None and cached in candidates:
             candidates = [cached] + [c for c in candidates if c != cached]
 
-        failures = []
-        for samplerate, channels in candidates:
-            stream = None
-            try:
-                stream = sd.InputStream(
-                    device=device,
-                    channels=channels,
-                    samplerate=samplerate,
-                    dtype="float32",
-                    blocksize=0,  # let PortAudio pick the lowest latency it can
-                    callback=self._callback,
-                )
-                self._capture_rate = samplerate
-                self._capture_channels = channels
-                stream.start()
-            except sd.PortAudioError as exc:
-                failures.append(f"{samplerate} Hz / {channels} ch: {exc}")
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except sd.PortAudioError:
-                        pass
-                continue
+        failures: list[str] = []
+        for attempt in range(_RETRY_PASSES):
+            if attempt:
+                time.sleep(_RETRY_DELAY_S)
+                log.info("Zaden format nie przeszedl - ponawiam (proba %d)", attempt + 1)
 
-            if cached != (samplerate, channels):
-                log.info("Format audio dla urzadzenia %s: %d Hz, %d kanal(y)", device, samplerate, channels)
-                self._format_cache[device] = (samplerate, channels)
-            return stream, samplerate, channels
+            for index, samplerate, channels in candidates:
+                stream = self._try_open(index, samplerate, channels, failures)
+                if stream is None:
+                    continue
+
+                if cached != (index, samplerate, channels):
+                    log.info(
+                        "Format audio: urzadzenie %s, %d Hz, %d kanal(y)", index, samplerate, channels
+                    )
+                    self._format_cache[cache_key] = (index, samplerate, channels)
+                return stream, samplerate, channels
 
         raise AudioError("Nie moge otworzyc mikrofonu. Probowane formaty: " + "; ".join(failures))
 
-    def _candidate_formats(self, device: int | None) -> list[tuple[int, int]]:
-        """Formats to try, best first: native rate beats resampling, mono beats downmixing."""
-        native, max_channels = self._device_format(device)
+    def _try_open(
+        self, index: int | None, samplerate: int, channels: int, failures: list[str]
+    ) -> sd.InputStream | None:
+        """One attempt. Returns a started stream, or None after recording why not."""
+        stream = None
+        try:
+            stream = sd.InputStream(
+                device=index,
+                channels=channels,
+                samplerate=samplerate,
+                dtype="float32",
+                blocksize=0,  # let PortAudio pick the lowest latency it can
+                callback=self._callback,
+            )
+            # Set before start(): the callback can fire the moment the stream runs.
+            self._capture_rate = samplerate
+            self._capture_channels = channels
+            stream.start()
+        except sd.PortAudioError as exc:
+            failures.append(f"[{index}] {samplerate} Hz / {channels} ch: {exc}")
+            if stream is not None:
+                try:
+                    stream.close()
+                except sd.PortAudioError:
+                    pass
+            return None
+        return stream
 
-        candidates = [(TARGET_RATE, 1)]
-        if native != TARGET_RATE:
-            candidates.append((native, 1))
-        if max_channels > 1:
-            candidates.append((native, min(2, max_channels)))
-            if native != TARGET_RATE:
-                candidates.append((TARGET_RATE, min(2, max_channels)))
-        return candidates
+    def _candidates(self, primary: DeviceInfo | None) -> list[tuple[int | None, int, int]]:
+        """Ordered (device index, rate, channels) attempts across host APIs."""
+        if primary is None:
+            native, max_channels = self._device_format(None)
+            return _formats_for(None, native, max_channels)
+
+        candidates: list[tuple[int | None, int, int]] = []
+        for device in sibling_devices(primary):
+            candidates += _formats_for(device.index, int(device.default_samplerate), device.channels)
+
+        # dict.fromkeys preserves order while removing duplicates.
+        return list(dict.fromkeys(candidates))
 
     @staticmethod
     def _device_format(device: int | None) -> tuple[int, int]:
@@ -329,6 +405,21 @@ class Recorder:
                 return
             room = max_frames - captured
             self._chunks.append(block[:room] if len(block) > room else block)
+
+
+def _formats_for(index: int | None, native: int, max_channels: int) -> list[tuple[int | None, int, int]]:
+    """Formats to try on one device, best first.
+
+    Native rate leads. Capturing at 16 kHz directly would skip our resampling
+    step, but WASAPI rejects anything but its mix format, so leading with 16 kHz
+    just burns an attempt on the host API most likely to succeed.
+    """
+    formats = [(index, native, 1)]
+    if max_channels > 1:
+        formats.append((index, native, min(2, max_channels)))
+    if native != TARGET_RATE:
+        formats.append((index, TARGET_RATE, 1))
+    return formats
 
 
 def _resample(audio: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:

@@ -108,12 +108,13 @@ max_entries = 5000
 [enhancement]
 enabled = false
 
-# "anthropic"  - Messages API. ~1 s. Needs ANTHROPIC_API_KEY. Traffic: USA.
-# "deepseek"   - Anthropic-compatible endpoint at api.deepseek.com. ~10x cheaper.
-#                Needs DEEPSEEK_API_KEY. Traffic: China - do not use for work
-#                content.
-# "claude_cli" - shells out to Claude Code. No key, uses your subscription,
-#                but measured at ~23 s per dictation with the full prompt.
+# "anthropic"  - Messages API. ~1 s (not measured). Needs ANTHROPIC_API_KEY.
+#                Traffic: USA.
+# "deepseek"   - Anthropic-compatible endpoint at api.deepseek.com. ~10x cheaper,
+#                measured at ~1.5 s from Poland. Needs DEEPSEEK_API_KEY.
+#                Traffic: China - do not use for work content.
+# "claude_cli" - shells out to Claude Code. No key, uses your subscription;
+#                measured at ~5 s with claude-sonnet-5 and the full prompt.
 provider = "anthropic"
 
 # Cleaning a transcript is not a reasoning task, so the fastest model wins.
@@ -121,6 +122,9 @@ provider = "anthropic"
 # automatically. Offered per provider:
 #   anthropic  / claude_cli : "claude-haiku-4-5", "claude-sonnet-5"
 #   deepseek                : "deepseek-v4-flash", "deepseek-v4-pro"
+#
+# Under claude_cli pick claude-sonnet-5: haiku-4-5 through the CLI measured
+# 19.8-60+ s over 5 runs (timing out twice) against sonnet's steady 4.2-5.7 s.
 model = "claude-haiku-4-5"
 
 # "default"  - full clean-up (fillers, self-corrections, punctuation)

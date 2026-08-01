@@ -13,10 +13,21 @@ log = logging.getLogger(__name__)
 
 # Models that run adaptive thinking when `thinking` is omitted. For a clean-up
 # task thinking is pure latency, so these get it switched off explicitly.
-# Haiku 4.5 and the DeepSeek models are absent on purpose: they do not think
-# unless asked, and Haiku 4.5 rejects the `effort` parameter outright.
+#
+# The DeepSeek models are here because they were measured, not assumed: every
+# one of 4 probe calls came back with a `thinking` block. On v4-flash the
+# reasoning ate the whole token budget (stop_reason=max_tokens, 1024 output
+# tokens, zero text) on 100% of calls; v4-pro thought briefly but on one call in
+# two returned *only* a thinking block. With thinking disabled, 6 of 6 calls
+# returned clean text in 35-44 output tokens.
+#
+# Haiku 4.5 stays out: it does not think unless asked, and it rejects the
+# `effort` parameter outright.
 _THINKS_BY_DEFAULT = frozenset(
-    {"claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5"}
+    {
+        "claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5",
+        "deepseek-v4-flash", "deepseek-v4-pro",
+    }
 )
 
 # Windows-only: keep a console window from flashing when the app runs under
@@ -97,7 +108,17 @@ class MessagesApiProvider:
         if message.stop_reason == "max_tokens":
             raise ProviderError("Odpowiedz LLM zostala ucieta na max_tokens")
 
-        return "".join(block.text for block in message.content if block.type == "text")
+        text = "".join(block.text for block in message.content if block.type == "text")
+        if not text.strip():
+            # A reply with no text block is a failure, and it must be raised as
+            # one. Returning "" would reach `output_filter` looking exactly like
+            # the EMPTY sentinel — "that was only noise, paste nothing" — so a
+            # broken provider would silently swallow the dictation instead of
+            # falling back to the raw transcript. Observed live: deepseek-v4-pro
+            # returned a lone `thinking` block with stop_reason=end_turn.
+            kinds = ", ".join(sorted({block.type for block in message.content})) or "brak"
+            raise ProviderError(f"Odpowiedz LLM nie zawiera tekstu (bloki: {kinds})")
+        return text
 
     def check(self) -> str | None:
         try:
@@ -148,7 +169,16 @@ class ClaudeCliProvider:
         if completed.returncode != 0:
             detail = (completed.stderr or "").strip() or f"kod wyjscia {completed.returncode}"
             raise ProviderError(f"Claude CLI: {detail}")
-        return completed.stdout.strip()
+
+        text = completed.stdout.strip()
+        if not text:
+            # Same trap as in MessagesApiProvider: an empty result would read as
+            # the EMPTY sentinel and drop the dictation instead of pasting it raw.
+            detail = (completed.stderr or "").strip()
+            raise ProviderError(
+                "Claude CLI zwrocil pusta odpowiedz" + (f": {detail}" if detail else "")
+            )
+        return text
 
     def check(self) -> str | None:
         import shutil

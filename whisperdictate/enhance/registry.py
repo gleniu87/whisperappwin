@@ -55,11 +55,16 @@ PROVIDERS: dict[str, ProviderSpec] = {
     ),
     "claude_cli": ProviderSpec(
         key="claude_cli",
-        label="Claude Code CLI (~23 s, bez klucza)",
+        label="Claude Code CLI (~5 s, bez klucza)",
         kind=CLI,
         base_url=None,
         env_var=None,
-        models=("claude-haiku-4-5", "claude-sonnet-5"),
+        # Sonnet first, against intuition, because it was measured: over 5 runs
+        # of the same transcript, haiku-4-5 through the CLI took 19.8-60+ s and
+        # timed out twice, while sonnet-5 stayed at 4.2-5.7 s. Whatever the CLI
+        # does around a haiku call dominates the model's own speed, so listing
+        # haiku first made the default choice the one that reliably times out.
+        models=("claude-sonnet-5", "claude-haiku-4-5"),
         hosting="Anthropic, przez Twoja subskrypcje Claude Code",
     ),
 }

@@ -5,6 +5,7 @@ both — which makes it easy to accidentally send one provider's model name, or
 one provider's key, to the other. These cover that seam.
 """
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,6 +53,12 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(registry.default_model("deepseek"), "deepseek-v4-flash")
         self.assertEqual(registry.default_model("anthropic"), "claude-haiku-4-5")
 
+    def test_cli_defaults_to_sonnet_because_haiku_times_out_there(self):
+        """Measured, not assumed: haiku through the CLI ran 19.8-60+ s over 5
+        runs and timed out twice; sonnet stayed at 4.2-5.7 s. Flipping this back
+        makes the default CLI model the one that misses the 60 s ceiling."""
+        self.assertEqual(registry.default_model("claude_cli"), "claude-sonnet-5")
+
 
 class ProviderBuildTest(unittest.TestCase):
     def test_builds_a_messages_client_for_deepseek(self):
@@ -92,6 +99,111 @@ class CredentialIsolationTest(unittest.TestCase):
         with mock.patch.dict("os.environ", {"DEEPSEEK_API_KEY": "   "}):
             with mock.patch.object(credentials, "_read_credential", lambda _t: "stored"):
                 self.assertEqual(credentials.get_api_key("deepseek"), "stored")
+
+
+class _Block:
+    def __init__(self, type_, text=""):
+        self.type = type_
+        self.text = text
+
+
+class _Message:
+    def __init__(self, content, stop_reason="end_turn"):
+        self.content = content
+        self.stop_reason = stop_reason
+
+
+class EmptyReplyTest(unittest.TestCase):
+    """A reply with no text must raise, never return "".
+
+    `output_filter` maps "" to the EMPTY sentinel — "that was only noise, paste
+    nothing". A provider that returns "" on failure would therefore delete the
+    user's dictation instead of falling back to the raw transcript. Observed
+    live: deepseek-v4-pro answered with a lone `thinking` block and
+    stop_reason=end_turn, which is a success as far as the API is concerned.
+    """
+
+    def _complete(self, message):
+        provider = MessagesApiProvider(registry.spec("deepseek"))
+        client = mock.Mock()
+        client.messages.create.return_value = message
+        with mock.patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-ds-x"}):
+            with mock.patch("anthropic.Anthropic", return_value=client):
+                return provider.complete("sys", "user", "deepseek-v4-pro", 30.0)
+
+    def test_thinking_only_reply_raises(self):
+        with self.assertRaises(providers.ProviderError) as caught:
+            self._complete(_Message([_Block("thinking")]))
+        self.assertIn("nie zawiera tekstu", str(caught.exception))
+
+    def test_error_names_the_blocks_that_did_arrive(self):
+        with self.assertRaises(providers.ProviderError) as caught:
+            self._complete(_Message([_Block("thinking")]))
+        self.assertIn("thinking", str(caught.exception))
+
+    def test_whitespace_only_text_raises(self):
+        with self.assertRaises(providers.ProviderError):
+            self._complete(_Message([_Block("text", "   \n  ")]))
+
+    def test_reply_with_no_blocks_at_all_raises(self):
+        with self.assertRaises(providers.ProviderError):
+            self._complete(_Message([]))
+
+    def test_real_text_alongside_thinking_is_returned(self):
+        message = _Message([_Block("thinking", "rozwazam"), _Block("text", "Gotowe.")])
+        self.assertEqual(self._complete(message), "Gotowe.")
+
+    def test_literal_empty_sentinel_still_gets_through(self):
+        """EMPTY is a real answer; only an absent one is an error."""
+        self.assertEqual(self._complete(_Message([_Block("text", "EMPTY")])), "EMPTY")
+
+
+class ThinkingDisabledTest(unittest.TestCase):
+    """DeepSeek thinks unless told not to — measured, not assumed.
+
+    Left on, v4-flash spent its entire token budget reasoning and returned no
+    text at all on every call.
+    """
+
+    def _request_for(self, model, provider_key="deepseek"):
+        provider = MessagesApiProvider(registry.spec(provider_key))
+        client = mock.Mock()
+        client.messages.create.return_value = _Message([_Block("text", "Gotowe.")])
+        env = {"DEEPSEEK_API_KEY": "sk-ds-x", "ANTHROPIC_API_KEY": "sk-ant-x"}
+        with mock.patch.dict("os.environ", env):
+            with mock.patch("anthropic.Anthropic", return_value=client):
+                provider.complete("sys", "user", model, 30.0)
+        return client.messages.create.call_args.kwargs
+
+    def test_deepseek_models_ask_for_thinking_off(self):
+        for model in registry.spec("deepseek").models:
+            self.assertEqual(
+                self._request_for(model).get("thinking"), {"type": "disabled"}, model
+            )
+
+    def test_haiku_is_left_alone(self):
+        """Haiku 4.5 does not think unless asked and rejects the parameter."""
+        self.assertNotIn("thinking", self._request_for("claude-haiku-4-5", "anthropic"))
+
+
+class CliEmptyOutputTest(unittest.TestCase):
+    def _run(self, stdout, stderr="", returncode=0):
+        completed = subprocess.CompletedProcess([], returncode, stdout, stderr)
+        with mock.patch("subprocess.run", return_value=completed):
+            return ClaudeCliProvider("claude").complete("sys", "user", "m", 30.0)
+
+    def test_empty_stdout_raises_instead_of_reading_as_empty_sentinel(self):
+        with self.assertRaises(providers.ProviderError) as caught:
+            self._run("   \n ")
+        self.assertIn("pusta odpowiedz", str(caught.exception))
+
+    def test_stderr_is_quoted_when_there_is_one(self):
+        with self.assertRaises(providers.ProviderError) as caught:
+            self._run("", stderr="usage limit reached")
+        self.assertIn("usage limit reached", str(caught.exception))
+
+    def test_normal_output_is_returned_stripped(self):
+        self.assertEqual(self._run("  Gotowe.\n"), "Gotowe.")
 
 
 class ProviderSwitchTest(unittest.TestCase):

@@ -245,11 +245,27 @@ def cmd_set_api_key(provider: str) -> int:
     print(f"Ruch idzie do: {provider_spec.hosting}")
     print("Klucz zostanie zapisany w Menedzerze polswiadczen Windows.")
     print("Nie trafi do pliku konfiguracyjnego ani do logow.\n")
-    try:
-        key = getpass.getpass("Klucz: ")
-    except (EOFError, KeyboardInterrupt):
-        print("\nPrzerwano.")
-        return 1
+
+    # Piped input wins over the interactive prompt. getpass needs a real Windows
+    # console; under Git Bash or an MSYS pty it falls back to an echoing read,
+    # which would print the key to the screen and into the scrollback.
+    if not sys.stdin.isatty():
+        key = sys.stdin.readline()
+        if not key.strip():
+            print("BLAD: nic nie przyszlo na stdin.")
+            return 1
+    else:
+        try:
+            key = getpass.getpass("Klucz: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nPrzerwano.")
+            return 1
+        except Exception as exc:  # noqa: BLE001 - getpass raises GetPassWarning-adjacent errors
+            print(f"BLAD: nie moge bezpiecznie odczytac klucza ({exc}).")
+            print("Podaj go przez potok, np.:")
+            print(f'  Read-Host "Klucz" -AsSecureString | ... | python -m whisperdictate '
+                  f"--set-api-key {provider}")
+            return 1
 
     try:
         credentials.set_api_key(provider, key)

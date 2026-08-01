@@ -20,6 +20,15 @@ log = logging.getLogger(__name__)
 LANGUAGES = ("pl", "en", "auto")
 MODES = ("hold", "toggle")
 DEVICES = ("auto", "cuda", "cpu")
+ENHANCEMENT_PROVIDERS = ("anthropic", "claude_cli")
+ENHANCEMENT_PROMPTS = ("default", "chat", "verbatim")
+
+# Offered in the tray. Haiku 4.5 leads because dictation is interactive: it is
+# the fastest current model, and cleaning a transcript is not a reasoning task.
+ENHANCEMENT_MODELS = (
+    "claude-haiku-4-5",
+    "claude-sonnet-5",
+)
 
 # Offered in the tray menu. Anything faster-whisper accepts still works if you
 # type it into the config by hand.
@@ -64,6 +73,20 @@ DEFAULTS: dict[str, Any] = {
     "history": {
         "enabled": True,
         "max_entries": 5000,
+    },
+    "enhancement": {
+        # Off by default, matching the macOS original (Helpers.swift defaults
+        # enhanceTranscription to false). Cleaning costs seconds and money, and
+        # raw output is predictable - opting in should be deliberate.
+        "enabled": False,
+        "provider": "anthropic",
+        "model": "claude-haiku-4-5",
+        "prompt": "default",
+        # Ceiling, not a wait: the API path answers in ~1 s. Sized for the CLI
+        # path, measured at ~23 s with the full system prompt - a 30 s ceiling
+        # made it fail intermittently.
+        "timeout_seconds": 60.0,
+        "cli_path": "",
     },
     "replacements": {},
 }
@@ -158,6 +181,9 @@ class Config:
         self._one_of("transcription.language", LANGUAGES)
         self._one_of("hotkey.mode", MODES)
         self._one_of("transcription.device", DEVICES)
+        self._one_of("enhancement.provider", ENHANCEMENT_PROVIDERS)
+        self._one_of("enhancement.prompt", ENHANCEMENT_PROMPTS)
+        self._clamp("enhancement.timeout_seconds", 5.0, 300.0)
         self._clamp("hotkey.hold_threshold_ms", 0, 3000)
         self._clamp("transcription.beam_size", 1, 10)
         self._clamp("audio.min_seconds", 0.0, 10.0)

@@ -82,6 +82,7 @@ przez inną aplikację, transkrypcja jest już zapisana i da się ją odzyskać.
 | `postprocess.py` | czyszczenie tekstu, filtr halucynacji, słownik zamian |
 | `history.py` | dopisywanie do JSONL, przycinanie |
 | `sounds.py` | nieblokujące sygnały dźwiękowe |
+| `enhance/` | czyszczenie transkrypcji przez LLM: prompty, providerzy, filtr wyjścia, klucz API |
 | `controller.py` | maszyna stanów, orkiestracja, protokół `UiSink` |
 | `ui/tray.py` | ikona zasobnika, menu, powiadomienia |
 | `ui/overlay.py` | pływający wskaźnik nagrywania |
@@ -150,6 +151,38 @@ liczby, więc idiom late-bindingu `lambda n=device.name: ...` dostaje obiekt `Ic
 zamiast nazwy. Predykaty `checked` są odporne (pystray woła je z jednym
 argumentem, więc drugi bierze wartość domyślną), ale akcje nie. Pilnuje tego
 `tests/test_tray_menu.py`.
+
+**Czyszczenie tekstu jest fail-soft i nigdy nie rzuca.**
+`EnhancementService.enhance()` zwraca `None` przy każdej awarii — brak klucza,
+limit API, timeout, błąd providera, a nawet nieoczekiwany wyjątek. `None` znaczy
+„wklej surowy transkrypt". Pusty string znaczy co innego: sentinel `EMPTY`
+z promptu, czyli „to był sam szum, nie wklejaj nic". To rozróżnienie jest
+celowe — awaria i cisza wyglądają identycznie, jeśli oba zwracają pustkę.
+
+**Transkrypcja jest opakowana w `<TRANSCRIPT>`.**
+Bez tego dyktowanie, które przypadkiem jest pytaniem („czy możesz to sprawdzić"),
+czyta się jak polecenie i model na nie odpowiada. Tag zamienia je w dane.
+
+**Bezpiecznik na odpowiedź zamiast czyszczenia.**
+Gdy wynik jest ponad trzykrotnie dłuższy od wejścia (i dłuższy niż 400 znaków),
+jest odrzucany. Oczyszczony tekst ma długość zbliżoną do oryginału; wynik
+wielokrotnie dłuższy to inny rodzaj tekstu — model odpowiedział zamiast oczyścić.
+
+**Prompt zawiera polskie słownictwo przerywników.**
+Prompt napisany po angielsku wycina „um" i zostawia „no więc yyy" nietknięte.
+Lista polskich wypełniaczy i zwrotów autopoprawki to funkcjonalny rdzeń, nie
+tłumaczenie.
+
+**Klucz API w Menedżerze poświadczeń, nie w configu.**
+`config.toml` to zwykły tekst w profilu roamingowym, nadpisywany przy każdym
+kliknięciu w tray. Menedżer poświadczeń szyfruje per użytkownik i trzyma klucz
+poza wszystkim, co da się przypadkiem udostępnić. `Persist` ustawione na
+`LOCAL_MACHINE`, żeby klucz nie wędrował z profilem domenowym.
+
+**Dialogi Tk odpalane przez `MainThreadDispatcher`.**
+Tray ma własną pętlę komunikatów Win32, a obiektów Tk wolno dotykać tylko
+z wątku, który je utworzył. Akcja menu wrzuca wywołanie do kolejki opróżnianej
+przez `after()` na wątku Tk.
 
 **Model ładowany z wyprzedzeniem w tle.**
 Konstrukcja `WhisperModel` to sekundy. Ładowanie przy pierwszym dyktowaniu

@@ -99,6 +99,40 @@ sounds = true
 enabled = true
 max_entries = 5000
 
+# LLM clean-up of the transcript before pasting: removes fillers ("yyy", "no
+# więc", "jakby", "w sensie"), applies spoken self-corrections ("wyślij do Marka
+# znaczy do Marcina" -> "wyślij do Marcina"), and fixes punctuation.
+#
+# Off by default, matching the macOS original. It costs seconds and money, and
+# raw transcription is predictable - turning this on should be deliberate.
+[enhancement]
+enabled = false
+
+# "anthropic"  - Messages API. ~1 s. Needs an API key (see below).
+# "claude_cli" - shells out to Claude Code. No key, uses your subscription,
+#                but measured at ~23 s per dictation with the full prompt.
+provider = "anthropic"
+
+# Cleaning a transcript is not a reasoning task, so the fastest model wins.
+# Offered in the tray: "claude-haiku-4-5", "claude-sonnet-5".
+model = "claude-haiku-4-5"
+
+# "default"  - full clean-up (fillers, self-corrections, punctuation)
+# "chat"     - same, tuned for Slack/Teams messages
+# "verbatim" - punctuation and diacritics only; keeps every spoken word
+prompt = "default"
+
+# Ceiling, not a wait. The API answers in about a second; the CLI needs far
+# longer. On timeout the raw transcript is pasted instead.
+timeout_seconds = 60.0
+
+# Override the Claude Code executable if it is not on PATH.
+cli_path = ""
+
+# The API key is NOT stored here. It lives in Windows Credential Manager:
+#   .\run.ps1 -SetApiKey        (or the tray: Czyszczenie tekstu -> Ustaw klucz API)
+# An ANTHROPIC_API_KEY environment variable takes precedence if set.
+
 # Literal find-and-replace applied to the transcript before pasting.
 # Case-insensitive; alphanumeric keys match on word boundaries only.
 [replacements]

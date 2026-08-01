@@ -14,6 +14,7 @@ from typing import Protocol
 
 from .audio import AudioError, Recorder
 from .config import Config
+from .enhance import EnhancementService
 from .history import History
 from .postprocess import process
 from .sounds import Sounds
@@ -27,6 +28,7 @@ class State(str, Enum):
     LOADING = "loading"
     RECORDING = "recording"
     TRANSCRIBING = "transcribing"
+    ENHANCING = "enhancing"
     ERROR = "error"
     PAUSED = "paused"
 
@@ -55,6 +57,7 @@ class DictationController:
         transcriber: Transcriber,
         history: History,
         sounds: Sounds,
+        enhancement: EnhancementService | None = None,
         ui: UiSink | None = None,
     ):
         self.config = config
@@ -62,6 +65,7 @@ class DictationController:
         self.transcriber = transcriber
         self.history = history
         self.sounds = sounds
+        self.enhancement = enhancement if enhancement is not None else EnhancementService(config)
         self._uis: list[UiSink] = [ui] if ui is not None else []
 
         self._state = State.IDLE
@@ -177,6 +181,34 @@ class DictationController:
         log.info("Mikrofon: %s", spec if spec is not None else "domyslny systemowy")
         self._set_state(self._state)
 
+    def set_enhancement_enabled(self, enabled: bool) -> None:
+        """Turn transcript clean-up on or off, warning if the provider is unusable."""
+        self.config.set("enhancement.enabled", enabled)
+        log.info("Czyszczenie tekstu %s", "wlaczone" if enabled else "wylaczone")
+        if enabled:
+            problem = self.enhancement.check()
+            if problem:
+                self._notify(f"Czyszczenie wlaczone, ale {problem}.", error=True)
+        self._set_state(self._state)
+
+    def set_enhancement_provider(self, provider: str) -> None:
+        self.config.set("enhancement.provider", provider)
+        log.info("Provider czyszczenia: %s", provider)
+        problem = self.enhancement.check()
+        if problem and self.enhancement.enabled:
+            self._notify(f"Provider {provider}: {problem}.", error=True)
+        self._set_state(self._state)
+
+    def set_enhancement_model(self, model: str) -> None:
+        self.config.set("enhancement.model", model)
+        log.info("Model czyszczenia: %s", model)
+        self._set_state(self._state)
+
+    def set_enhancement_prompt(self, prompt: str) -> None:
+        self.config.set("enhancement.prompt", prompt)
+        log.info("Styl czyszczenia: %s", prompt)
+        self._set_state(self._state)
+
     def set_model(self, model: str) -> None:
         if model == self.transcriber.model_name:
             return
@@ -209,17 +241,35 @@ class DictationController:
             self._notify(str(exc), error=True)
             return
 
-        text = process(result.text, self.config.get("replacements", {}))
-        if not text:
+        raw_text = process(result.text, self.config.get("replacements", {}))
+        if not raw_text:
             log.info("Pusta transkrypcja - nic do wklejenia")
             self.sounds.play("cancel")
             self._set_state(State.IDLE, "cisza")
             return
 
+        text, enhancement = raw_text, None
+        if self.enhancement.enabled:
+            self._set_state(State.ENHANCING)
+            # Returns None on any failure - the raw transcript is pasted instead.
+            enhancement = self.enhancement.enhance(raw_text, result.language)
+            if enhancement is not None:
+                text = enhancement.text
+
+        if not text:
+            # The prompt's EMPTY sentinel: the model judged this pure filler.
+            log.info("Warstwa czyszczaca uznala transkrypcje za pusta - nie wklejam")
+            self.sounds.play("cancel")
+            self._set_state(State.IDLE, "odrzucone jako szum")
+            return
+
         # Deliberately ordered: history first. If the paste fails, the transcript
-        # is still recoverable from the log instead of being lost.
+        # is still recoverable from the log instead of being lost. raw_text is
+        # kept alongside so a bad clean-up never destroys the original.
         self.history.append(
             text=text,
+            raw_text=raw_text if enhancement is not None else None,
+            enhanced_by=f"{enhancement.provider}/{enhancement.model}" if enhancement else None,
             language=result.language,
             language_probability=round(result.language_probability, 3),
             model=self.transcriber.model_name,
@@ -247,7 +297,10 @@ class DictationController:
             return
 
         self.sounds.play("success")
-        self._set_state(State.IDLE, f"{len(text)} znakow, {result.speedup:.0f}x realtime")
+        detail = f"{len(text)} znakow, {result.speedup:.0f}x realtime"
+        if enhancement is not None:
+            detail += f", oczyszczone +{enhancement.elapsed_seconds:.1f} s"
+        self._set_state(State.IDLE, detail)
 
     # -- helpers ----------------------------------------------------------
 

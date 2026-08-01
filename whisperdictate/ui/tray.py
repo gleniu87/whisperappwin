@@ -16,8 +16,17 @@ from PIL import Image, ImageDraw
 
 from .. import APP_NAME, paths
 from ..audio import DeviceInfo, list_input_devices, refresh_devices
-from ..config import LANGUAGES, MODEL_CHOICES, Config
+from ..config import (
+    ENHANCEMENT_MODELS,
+    ENHANCEMENT_PROMPTS,
+    ENHANCEMENT_PROVIDERS,
+    LANGUAGES,
+    MODEL_CHOICES,
+    Config,
+)
 from ..controller import DictationController, State
+from ..enhance import PROVIDERS as PROVIDER_LABELS
+from ..enhance.prompts import PROMPT_LABELS
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +44,7 @@ STATE_COLOUR: dict[State, str] = {
     State.LOADING: "#f0b429",
     State.RECORDING: "#e5484d",
     State.TRANSCRIBING: "#3b82f6",
+    State.ENHANCING: "#8b5cf6",
     State.ERROR: "#e5484d",
     State.PAUSED: "#4b5060",
 }
@@ -44,6 +54,7 @@ STATE_LABEL: dict[State, str] = {
     State.LOADING: "Laduje model",
     State.RECORDING: "Nagrywanie",
     State.TRANSCRIBING: "Transkrybuje",
+    State.ENHANCING: "Czyszcze tekst",
     State.ERROR: "Blad",
     State.PAUSED: "Wstrzymane",
 }
@@ -75,10 +86,12 @@ class Tray:
         controller: DictationController,
         config: Config,
         on_quit: Callable[[], None],
+        dispatcher=None,  # noqa: ANN001 - MainThreadDispatcher; optional for tests
     ):
         self.controller = controller
         self.config = config
         self._on_quit = on_quit
+        self._dispatcher = dispatcher
         self._state = State.IDLE
         self._detail = ""
         self._devices: list[DeviceInfo] = list_input_devices()
@@ -140,6 +153,7 @@ class Tray:
             item("Jezyk", pystray.Menu(*self._language_items())),
             item("Model", pystray.Menu(*self._model_items())),
             item("Mikrofon", pystray.Menu(*self._device_items())),
+            item("Czyszczenie tekstu", pystray.Menu(*self._enhancement_items())),
             pystray.Menu.SEPARATOR,
             item(
                 "Wstrzymaj dyktowanie",
@@ -156,7 +170,8 @@ class Tray:
 
     def _status_line(self) -> str:
         label = STATE_LABEL.get(self._state, self._state.value)
-        return f"{label} - {self.controller.transcriber.description}"
+        cleanup = self.controller.enhancement.describe()
+        return f"{label} - {self.controller.transcriber.description} | czyszczenie: {cleanup}"
 
     def _language_items(self) -> list[pystray.MenuItem]:
         def make(code: str) -> pystray.MenuItem:
@@ -217,7 +232,68 @@ class Tray:
         items.append(pystray.MenuItem("Odswiez liste", self._refresh_devices))
         return items
 
+    def _enhancement_items(self) -> list[pystray.MenuItem]:
+        """Clean-up settings. Closures throughout — see the arity note in _device_items."""
+        item = pystray.MenuItem
+        items = [
+            item(
+                "Wlacz czyszczenie",
+                self._toggle_enhancement,
+                checked=lambda _: bool(self.config.get("enhancement.enabled")),
+            ),
+            pystray.Menu.SEPARATOR,
+        ]
+
+        def radio(dotted: str, value: str, label: str, setter) -> pystray.MenuItem:  # noqa: ANN001
+            def select() -> None:
+                setter(value)
+
+            return item(
+                label,
+                select,
+                checked=lambda _, d=dotted, v=value: self.config.get(d) == v,
+                radio=True,
+            )
+
+        items += [
+            radio("enhancement.provider", key, PROVIDER_LABELS[key],
+                  self.controller.set_enhancement_provider)
+            for key in ENHANCEMENT_PROVIDERS
+        ]
+        items.append(pystray.Menu.SEPARATOR)
+        items += [
+            radio("enhancement.model", name, name, self.controller.set_enhancement_model)
+            for name in ENHANCEMENT_MODELS
+        ]
+        items.append(pystray.Menu.SEPARATOR)
+        items += [
+            radio("enhancement.prompt", key, PROMPT_LABELS[key],
+                  self.controller.set_enhancement_prompt)
+            for key in ENHANCEMENT_PROMPTS
+        ]
+
+        if self._dispatcher is not None:
+            items.append(pystray.Menu.SEPARATOR)
+            items.append(item("Ustaw klucz API...", self._set_api_key))
+            items.append(item("Usun klucz API", self._delete_api_key))
+        return items
+
     # -- actions --------------------------------------------------------
+
+    def _toggle_enhancement(self) -> None:
+        self.controller.set_enhancement_enabled(
+            not bool(self.config.get("enhancement.enabled"))
+        )
+
+    def _set_api_key(self) -> None:
+        from . import dialogs
+
+        self._dispatcher.call(lambda: dialogs.ask_api_key(self._dispatcher.root))
+
+    def _delete_api_key(self) -> None:
+        from . import dialogs
+
+        self._dispatcher.call(lambda: dialogs.confirm_delete_api_key(self._dispatcher.root))
 
     def _refresh_devices(self) -> None:
         """Re-enumerate microphones and rebuild the menu around the new list."""

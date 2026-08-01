@@ -30,6 +30,7 @@ STATE_STYLE: dict[State, tuple[str, str]] = {
     State.LOADING: ("#f0b429", "Laduje model..."),
     State.RECORDING: ("#e5484d", "Nagrywanie"),
     State.TRANSCRIBING: ("#3b82f6", "Transkrybuje..."),
+    State.ENHANCING: ("#8b5cf6", "Czyszcze tekst..."),
     State.ERROR: ("#e5484d", "Blad"),
 }
 

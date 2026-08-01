@@ -88,6 +88,66 @@ hotkey nie zadziałałby ani razu.
 Jeśli mimo to przeszkadza, zmień `hotkey.key` w konfiguracji na `f9`,
 `scroll_lock` albo `ctrl_r`, albo podnieś `hold_threshold_ms`.
 
+## Czyszczenie tekstu przez LLM
+
+Surowa transkrypcja zawiera wszystko, co powiedziałeś — łącznie z `yyy`, `no więc`,
+`jakby`, `w sensie` i poprawkami w locie. Warstwa czyszcząca przepuszcza ją przez
+model, zanim trafi do schowka:
+
+```
+PRZED:  ...bo myślałem, że ta oryginalna aplikacja od Jacka, to ona jakby te,
+        ucina takie, wiesz, że przerabia te moje słowa...
+PO:     ...bo myślałem, że oryginalna aplikacja od Jacka przerabia te moje słowa...
+```
+
+Robi cztery rzeczy: wycina przerywniki, stosuje autopoprawki (`wyślij do Marka
+znaczy do Marcina` → `wyślij do Marcina`), poprawia interpunkcję i polskie znaki,
+a przy samej ciszy zwraca sentinel `EMPTY` i nic nie wkleja. Nie rusza
+identyfikatorów, ścieżek, flag CLI ani `camelCase`.
+
+**Domyślnie wyłączone**, tak jak w oryginale. Włączasz z menu tray →
+*Czyszczenie tekstu* → *Włącz czyszczenie*.
+
+### Który provider
+
+| | Anthropic API | Claude Code CLI |
+|---|---|---|
+| Czas na dyktowanie | **~1 s** (Haiku 4.5) | **~23 s** (zmierzone) |
+| Klucz API | wymagany | niepotrzebny |
+| Koszt | ułamki grosza za dyktowanie | Twoja subskrypcja |
+
+API jest domyślne — przy dyktowaniu opóźnienie jest odczuwalne od razu. CLI to
+opcja, gdy nie chcesz zarządzać kluczem.
+
+### Klucz API
+
+Nie trafia do pliku konfiguracyjnego. Ląduje w **Menedżerze poświadczeń Windows**,
+szyfrowany per użytkownik:
+
+```powershell
+.\run.ps1 -SetApiKey
+```
+
+Albo z menu tray → *Czyszczenie tekstu* → *Ustaw klucz API…*. Zmienna
+`ANTHROPIC_API_KEY` ma pierwszeństwo, jeśli ustawiona.
+
+### Zasada fail-soft
+
+Awaria czyszczenia **nigdy nie kosztuje dyktowania**. Brak klucza, limit API, brak
+sieci, timeout, błąd providera — wkleja się surowa transkrypcja, a powód ląduje
+w logu. Historia zapisuje obie wersje (`text` i `raw_text`), więc złe czyszczenie
+też nie niszczy oryginału.
+
+Osobny bezpiecznik: gdy odpowiedź modelu jest nieproporcjonalnie długa względem
+transkrypcji, jest odrzucana. To przypadek, w którym model **odpowiedział** na
+Twoje dyktowanie zamiast je oczyścić — wtedy lepszy jest surowy tekst.
+
+Test bez mikrofonu:
+
+```powershell
+.\run.ps1 -Enhance "no wiec yyy wyslij to do Marka znaczy do Marcina"
+```
+
 ## Konfiguracja
 
 Plik: `%APPDATA%\WhisperDictateWin\config.toml` (tworzony przy pierwszym starcie).
@@ -116,6 +176,8 @@ nie przetrwają. Notatki trzymaj w `config.example.toml`.
 .\run.ps1 -ListDevices -All           # + duplikaty z MME/DirectSound/WDM-KS
 .\run.ps1 -Record 5                   # nagraj 5 s i wypisz transkrypcję (bez hotkeya)
 .\run.ps1 -Record 5 -Device "Anker"   # ...z konkretnego mikrofonu, bez zmiany configu
+.\run.ps1 -SetApiKey                  # zapisz klucz API w Menedżerze poświadczeń
+.\run.ps1 -Enhance "no wiec yyy test" # przetestuj czyszczenie tekstu
 .\run.ps1 -Trace                      # logowanie DEBUG
 ```
 
@@ -147,8 +209,9 @@ właściwego mikrofonu.
 
 Oryginał ma kilka rzeczy, których ta wersja świadomie nie odtwarza:
 
-- **Poprawianie tekstu przez LLM** (Anthropic / Ollama / Claude Code). Osobna
-  funkcja z własnym kosztem opóźnienia i prywatności; tutaj wszystko zostaje lokalnie.
+- **Providerzy OpenAI, OpenRouter i Ollama** dla czyszczenia tekstu. Zaimplementowane
+  są dwa: Anthropic API i Claude Code CLI. Interfejs `Provider` jest jednometodowy,
+  więc dołożenie kolejnego to jedna klasa.
 - **Okno z dashboardem** (8 zakładek, statystyki, przeglądarka historii). Historia
   jest zapisywana do JSONL, ale przegląda się ją w edytorze.
 - **Pobieranie modeli z paskiem postępu.** Zajmuje się tym Hugging Face Hub.

@@ -39,7 +39,10 @@ class History:
         """Record one transcription. Never raises - a failed log must not lose the paste."""
         if not self.enabled:
             return
-        entry = {"timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), **fields}
+        # Drop unset optional fields so a line stays readable instead of carrying
+        # a run of nulls for features that were not used.
+        present = {k: v for k, v in fields.items() if v is not None}
+        entry = {"timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"), **present}
         line = json.dumps(entry, ensure_ascii=False)
 
         with self._lock:

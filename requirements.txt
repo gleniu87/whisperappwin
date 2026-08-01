@@ -9,3 +9,7 @@ pystray>=0.19.5
 Pillow>=10.0.0
 pywin32>=306
 tomli-w>=1.0.0
+
+# LLM transcript clean-up (optional feature, off by default). Only imported when
+# enhancement.provider = "anthropic" and the feature is enabled.
+anthropic>=0.69

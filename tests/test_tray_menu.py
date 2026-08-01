@@ -20,6 +20,7 @@ from whisperdictate import audio
 from whisperdictate.audio import DeviceInfo
 from whisperdictate.config import Config
 from whisperdictate.controller import State
+from whisperdictate.enhance import EnhancementService
 
 FAKE_DEVICES = [
     DeviceInfo(25, "Mikrofon (Anker PowerConf C200)", 2, 48000.0, "Windows WASAPI", False),
@@ -38,6 +39,23 @@ class FakeController:
         self.paused = False
         self.calls = []
         self.transcriber = mock.Mock(model_name="large-v3-turbo", description="large-v3-turbo @ cpu/int8")
+        self.enhancement = EnhancementService(config)
+
+    def set_enhancement_enabled(self, enabled):
+        self.calls.append(("enhancement_enabled", enabled))
+        self.config.set("enhancement.enabled", enabled)
+
+    def set_enhancement_provider(self, provider):
+        self.calls.append(("enhancement_provider", provider))
+        self.config.set("enhancement.provider", provider)
+
+    def set_enhancement_model(self, model):
+        self.calls.append(("enhancement_model", model))
+        self.config.set("enhancement.model", model)
+
+    def set_enhancement_prompt(self, prompt):
+        self.calls.append(("enhancement_prompt", prompt))
+        self.config.set("enhancement.prompt", prompt)
 
     def set_audio_device(self, spec):
         self.calls.append(("device", spec))
@@ -103,6 +121,31 @@ class TrayMenuTest(unittest.TestCase):
         medium = next(i for i in self.submenu("Model") if str(i.text) == "medium")
         medium(SENTINEL_ICON)
         self.assertEqual(self.controller.calls, [("model", "medium")])
+
+    def test_enhancement_provider_action_receives_the_key(self):
+        cli = next(i for i in self.submenu("Czyszczenie tekstu") if "CLI" in str(i.text))
+        cli(SENTINEL_ICON)
+        self.assertEqual(self.controller.calls, [("enhancement_provider", "claude_cli")])
+
+    def test_enhancement_model_action_receives_the_name(self):
+        sonnet = next(
+            i for i in self.submenu("Czyszczenie tekstu") if str(i.text) == "claude-sonnet-5"
+        )
+        sonnet(SENTINEL_ICON)
+        self.assertEqual(self.controller.calls, [("enhancement_model", "claude-sonnet-5")])
+
+    def test_enhancement_toggle_flips_the_flag(self):
+        toggle = next(
+            i for i in self.submenu("Czyszczenie tekstu") if str(i.text) == "Wlacz czyszczenie"
+        )
+        self.assertFalse(toggle.checked)
+        toggle(SENTINEL_ICON)
+        self.assertEqual(self.controller.calls, [("enhancement_enabled", True)])
+
+    def test_api_key_items_hidden_without_a_dispatcher(self):
+        """Without a Tk thread to open a dialog on, the items would be dead."""
+        labels = [str(i.text) for i in self.submenu("Czyszczenie tekstu")]
+        self.assertNotIn("Ustaw klucz API...", labels)
 
     def test_every_action_in_the_tree_survives_being_invoked_by_pystray(self):
         """Any action with the wrong arity raises TypeError when pystray calls it."""

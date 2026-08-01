@@ -22,6 +22,7 @@ from . import APP_NAME, __version__, paths
 from .audio import AudioError, Recorder, list_input_devices
 from .config import Config
 from .controller import DictationController
+from .enhance import EnhancementService, credentials
 from .history import History
 from .hotkey import TRIGGERS, HotkeyListener
 from .sounds import Sounds
@@ -159,6 +160,12 @@ def cmd_check(config: Config) -> int:
     known = "OK" if key in TRIGGERS else f"NIEZNANY (dostepne: {', '.join(sorted(TRIGGERS))})"
     print(f"  Hotkey           {key} / {config.get('hotkey.mode')} - {known}")
 
+    enhancement = EnhancementService(config)
+    problem = enhancement.check()
+    status = "OK" if problem is None else f"NIEGOTOWE ({problem})"
+    print(f"  Czyszczenie      {enhancement.describe()} - {status}")
+    print(f"  Klucz API        {credentials.source()}")
+
     print("\nLaduje model (przy pierwszym uruchomieniu pobiera ~1.6 GB)...")
     transcriber = build_transcriber(config)
     try:
@@ -217,6 +224,57 @@ def cmd_record(config: Config, seconds: float) -> int:
     return 0
 
 
+def cmd_set_api_key() -> int:
+    """Read a key from the console (never echoed) into Credential Manager."""
+    import getpass
+
+    print("Klucz API Anthropic zostanie zapisany w Menedzerze polswiadczen Windows.")
+    print("Nie trafi do pliku konfiguracyjnego ani do logow.\n")
+    try:
+        key = getpass.getpass("Klucz (sk-ant-...): ")
+    except (EOFError, KeyboardInterrupt):
+        print("\nPrzerwano.")
+        return 1
+
+    try:
+        credentials.set_api_key(key)
+    except (ValueError, OSError) as exc:
+        print(f"BLAD: {exc}")
+        return 1
+    print("Zapisano. Wlacz czyszczenie w menu tray albo ustaw enhancement.enabled = true.")
+    return 0
+
+
+def cmd_enhance(config: Config, text: str) -> int:
+    """Run the clean-up layer over a literal string. Exercises it without a mic."""
+    service = EnhancementService(config)
+    problem = service.check()
+    if problem:
+        print(f"BLAD: {problem}")
+        return 1
+
+    # --enhance is an explicit request, so honour it even when the feature is
+    # off in the config; that is what makes it useful for trying before enabling.
+    config.set("enhancement.enabled", True, save=False)
+    language = config.get("transcription.language", "pl")
+
+    print(f"Provider: {service.provider_name} / {service.model}")
+    print(f"Styl:     {config.get('enhancement.prompt')}\n")
+    print(f"Przed ({len(text)} znakow):\n  {text}\n")
+
+    result = service.enhance(text, language)
+    if result is None:
+        print("Czyszczenie nie powiodlo sie - w aplikacji wkleiłby sie surowy tekst.")
+        print("Szczegoly w logu: " + str(paths.log_path()))
+        return 1
+    if not result.text:
+        print("Wynik: EMPTY - model uznal to za sam szum, nic nie zostaloby wklejone.")
+        return 0
+
+    print(f"Po ({len(result.text)} znakow, {result.elapsed_seconds:.2f} s):\n  {result.text}")
+    return 0
+
+
 # ------------------------------------------------------------------- app
 
 
@@ -238,6 +296,7 @@ def run_app(config: Config) -> int:
     root = tk.Tk()
     root.withdraw()
 
+    from .ui.dispatch import MainThreadDispatcher
     from .ui.overlay import Overlay
     from .ui.tray import Tray
 
@@ -246,6 +305,7 @@ def run_app(config: Config) -> int:
         level_provider=lambda: recorder.level,
         enabled=bool(config.get("ui.overlay", True)),
     )
+    dispatcher = MainThreadDispatcher(root)
 
     controller = DictationController(
         config=config,
@@ -253,11 +313,17 @@ def run_app(config: Config) -> int:
         transcriber=transcriber,
         history=history,
         sounds=sounds,
+        enhancement=EnhancementService(config),
         ui=overlay,
     )
 
     quit_event = threading.Event()
-    tray = Tray(controller=controller, config=config, on_quit=quit_event.set)
+    tray = Tray(
+        controller=controller,
+        config=config,
+        on_quit=quit_event.set,
+        dispatcher=dispatcher,
+    )
     controller.add_ui(tray)
 
     listener = HotkeyListener(
@@ -326,6 +392,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--device", metavar="NAZWA",
         help="z --record: uzyj tego mikrofonu zamiast tego z konfiguracji",
     )
+    parser.add_argument(
+        "--set-api-key", action="store_true",
+        help="zapisz klucz API Anthropic w Menedzerze polswiadczen Windows",
+    )
+    parser.add_argument(
+        "--enhance", metavar="TEKST",
+        help="przepusc tekst przez warstwe czyszczaca i wypisz wynik",
+    )
     return parser.parse_args(argv)
 
 
@@ -334,6 +408,10 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(args.verbose)
     config = Config.load(paths.config_path())
 
+    if args.set_api_key:
+        return cmd_set_api_key()
+    if args.enhance is not None:
+        return cmd_enhance(config, args.enhance)
     if args.list_devices:
         return cmd_list_devices(all_host_apis=args.all)
     if args.check:

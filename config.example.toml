@@ -108,13 +108,19 @@ max_entries = 5000
 [enhancement]
 enabled = false
 
-# "anthropic"  - Messages API. ~1 s. Needs an API key (see below).
+# "anthropic"  - Messages API. ~1 s. Needs ANTHROPIC_API_KEY. Traffic: USA.
+# "deepseek"   - Anthropic-compatible endpoint at api.deepseek.com. ~10x cheaper.
+#                Needs DEEPSEEK_API_KEY. Traffic: China - do not use for work
+#                content.
 # "claude_cli" - shells out to Claude Code. No key, uses your subscription,
 #                but measured at ~23 s per dictation with the full prompt.
 provider = "anthropic"
 
 # Cleaning a transcript is not a reasoning task, so the fastest model wins.
-# Offered in the tray: "claude-haiku-4-5", "claude-sonnet-5".
+# Model names are provider-specific; switching provider from the tray swaps this
+# automatically. Offered per provider:
+#   anthropic  / claude_cli : "claude-haiku-4-5", "claude-sonnet-5"
+#   deepseek                : "deepseek-v4-flash", "deepseek-v4-pro"
 model = "claude-haiku-4-5"
 
 # "default"  - full clean-up (fillers, self-corrections, punctuation)
@@ -129,9 +135,13 @@ timeout_seconds = 60.0
 # Override the Claude Code executable if it is not on PATH.
 cli_path = ""
 
-# The API key is NOT stored here. It lives in Windows Credential Manager:
-#   .\run.ps1 -SetApiKey        (or the tray: Czyszczenie tekstu -> Ustaw klucz API)
-# An ANTHROPIC_API_KEY environment variable takes precedence if set.
+# API keys are NOT stored here. They live in Windows Credential Manager, one
+# entry per provider:
+#   .\run.ps1 -SetApiKey anthropic
+#   .\run.ps1 -SetApiKey deepseek
+# (or the tray: Czyszczenie tekstu -> Klucz API: ...)
+# ANTHROPIC_API_KEY / DEEPSEEK_API_KEY take precedence if set. Each provider
+# reads only its own, so one never shadows the other.
 
 # Literal find-and-replace applied to the transcript before pasting.
 # Case-insensitive; alphanumeric keys match on word boundaries only.

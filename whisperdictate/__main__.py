@@ -160,11 +160,16 @@ def cmd_check(config: Config) -> int:
     known = "OK" if key in TRIGGERS else f"NIEZNANY (dostepne: {', '.join(sorted(TRIGGERS))})"
     print(f"  Hotkey           {key} / {config.get('hotkey.mode')} - {known}")
 
+    from .enhance import PROVIDERS as PROVIDER_SPECS
+
     enhancement = EnhancementService(config)
     problem = enhancement.check()
     status = "OK" if problem is None else f"NIEGOTOWE ({problem})"
     print(f"  Czyszczenie      {enhancement.describe()} - {status}")
-    print(f"  Klucz API        {credentials.source()}")
+    for key, provider_spec in PROVIDER_SPECS.items():
+        if provider_spec.env_var is None:
+            continue
+        print(f"    klucz {key:<10} {credentials.source(key)}  ->  {provider_spec.hosting}")
 
     print("\nLaduje model (przy pierwszym uruchomieniu pobiera ~1.6 GB)...")
     transcriber = build_transcriber(config)
@@ -224,39 +229,58 @@ def cmd_record(config: Config, seconds: float) -> int:
     return 0
 
 
-def cmd_set_api_key() -> int:
+def cmd_set_api_key(provider: str) -> int:
     """Read a key from the console (never echoed) into Credential Manager."""
     import getpass
 
-    print("Klucz API Anthropic zostanie zapisany w Menedzerze polswiadczen Windows.")
+    from .enhance import PROVIDERS as PROVIDER_SPECS
+
+    if provider not in PROVIDER_SPECS or PROVIDER_SPECS[provider].env_var is None:
+        keyed = [k for k, s in PROVIDER_SPECS.items() if s.env_var]
+        print(f"Nieznany provider {provider!r}. Dostepne: {', '.join(keyed)}")
+        return 1
+
+    provider_spec = PROVIDER_SPECS[provider]
+    print(f"Provider:  {provider_spec.label}")
+    print(f"Ruch idzie do: {provider_spec.hosting}")
+    print("Klucz zostanie zapisany w Menedzerze polswiadczen Windows.")
     print("Nie trafi do pliku konfiguracyjnego ani do logow.\n")
     try:
-        key = getpass.getpass("Klucz (sk-ant-...): ")
+        key = getpass.getpass("Klucz: ")
     except (EOFError, KeyboardInterrupt):
         print("\nPrzerwano.")
         return 1
 
     try:
-        credentials.set_api_key(key)
+        credentials.set_api_key(provider, key)
     except (ValueError, OSError) as exc:
         print(f"BLAD: {exc}")
         return 1
-    print("Zapisano. Wlacz czyszczenie w menu tray albo ustaw enhancement.enabled = true.")
+    print(f"\nZapisano ({provider}). Wlacz czyszczenie w menu tray.")
     return 0
 
 
-def cmd_enhance(config: Config, text: str) -> int:
+def _prepare_for_enhance(config: Config, provider: str | None) -> str:
+    """Force the feature on for a one-shot run, optionally overriding the provider."""
+    from .enhance import registry
+
+    config.set("enhancement.enabled", True, save=False)
+    if provider:
+        config.set("enhancement.provider", provider, save=False)
+        if not registry.supports_model(provider, config.get("enhancement.model", "")):
+            config.set("enhancement.model", registry.default_model(provider), save=False)
+    return config.get("transcription.language", "pl")
+
+
+def cmd_enhance(config: Config, text: str, provider: str | None) -> int:
     """Run the clean-up layer over a literal string. Exercises it without a mic."""
+    language = _prepare_for_enhance(config, provider)
     service = EnhancementService(config)
+
     problem = service.check()
     if problem:
         print(f"BLAD: {problem}")
         return 1
-
-    # --enhance is an explicit request, so honour it even when the feature is
-    # off in the config; that is what makes it useful for trying before enabling.
-    config.set("enhancement.enabled", True, save=False)
-    language = config.get("transcription.language", "pl")
 
     print(f"Provider: {service.provider_name} / {service.model}")
     print(f"Styl:     {config.get('enhancement.prompt')}\n")
@@ -264,7 +288,7 @@ def cmd_enhance(config: Config, text: str) -> int:
 
     result = service.enhance(text, language)
     if result is None:
-        print("Czyszczenie nie powiodlo sie - w aplikacji wkleiłby sie surowy tekst.")
+        print("Czyszczenie nie powiodlo sie - w aplikacji wkleilby sie surowy tekst.")
         print("Szczegoly w logu: " + str(paths.log_path()))
         return 1
     if not result.text:
@@ -272,6 +296,50 @@ def cmd_enhance(config: Config, text: str) -> int:
         return 0
 
     print(f"Po ({len(result.text)} znakow, {result.elapsed_seconds:.2f} s):\n  {result.text}")
+    return 0
+
+
+def cmd_benchmark(config: Config, text: str) -> int:
+    """Run the same transcript through every ready provider and compare.
+
+    Latency is the deciding factor for dictation, and it cannot be reasoned
+    about from pricing pages — it has to be measured from where you sit.
+    """
+    from .enhance import PROVIDERS as PROVIDER_SPECS
+
+    language = _prepare_for_enhance(config, None)
+    print(f"Tekst wejsciowy ({len(text)} znakow):\n  {text}\n")
+
+    rows = []
+    for key, provider_spec in PROVIDER_SPECS.items():
+        for model in provider_spec.models:
+            config.set("enhancement.provider", key, save=False)
+            config.set("enhancement.model", model, save=False)
+            service = EnhancementService(config)
+
+            problem = service.check()
+            if problem:
+                print(f"--- {key} / {model}: POMINIETO ({problem})")
+                continue
+
+            print(f"--- {key} / {model}  [{provider_spec.hosting}]")
+            result = service.enhance(text, language)
+            if result is None:
+                print("    NIEUDANE (szczegoly w logu)\n")
+                rows.append((key, model, None, None))
+                continue
+            print(f"    {result.elapsed_seconds:6.2f} s  ->  {result.text}\n")
+            rows.append((key, model, result.elapsed_seconds, len(result.text)))
+
+    ok = [r for r in rows if r[2] is not None]
+    if not ok:
+        print("Zaden provider nie odpowiedzial.")
+        return 1
+
+    print("Podsumowanie (posortowane po czasie):")
+    print(f"  {'provider/model':<34} {'czas':>8} {'znakow':>8}")
+    for key, model, elapsed, length in sorted(ok, key=lambda r: r[2]):
+        print(f"  {key + '/' + model:<34} {elapsed:>7.2f}s {length:>8}")
     return 0
 
 
@@ -393,12 +461,20 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="z --record: uzyj tego mikrofonu zamiast tego z konfiguracji",
     )
     parser.add_argument(
-        "--set-api-key", action="store_true",
-        help="zapisz klucz API Anthropic w Menedzerze polswiadczen Windows",
+        "--set-api-key", metavar="PROVIDER", nargs="?", const="anthropic",
+        help="zapisz klucz API w Menedzerze polswiadczen (anthropic | deepseek)",
     )
     parser.add_argument(
         "--enhance", metavar="TEKST",
         help="przepusc tekst przez warstwe czyszczaca i wypisz wynik",
+    )
+    parser.add_argument(
+        "--provider", metavar="NAZWA",
+        help="z --enhance: uzyj tego providera zamiast tego z konfiguracji",
+    )
+    parser.add_argument(
+        "--benchmark", metavar="TEKST",
+        help="porownaj wszystkich gotowych providerow na tym samym tekscie",
     )
     return parser.parse_args(argv)
 
@@ -409,9 +485,11 @@ def main(argv: list[str] | None = None) -> int:
     config = Config.load(paths.config_path())
 
     if args.set_api_key:
-        return cmd_set_api_key()
+        return cmd_set_api_key(args.set_api_key)
     if args.enhance is not None:
-        return cmd_enhance(config, args.enhance)
+        return cmd_enhance(config, args.enhance, args.provider)
+    if args.benchmark is not None:
+        return cmd_benchmark(config, args.benchmark)
     if args.list_devices:
         return cmd_list_devices(all_host_apis=args.all)
     if args.check:

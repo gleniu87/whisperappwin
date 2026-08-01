@@ -15,20 +15,15 @@ from typing import Any
 
 import tomli_w
 
+# Import-free module by design, so this cannot cycle back into config.
+from .enhance.registry import PROVIDER_KEYS as ENHANCEMENT_PROVIDERS
+
 log = logging.getLogger(__name__)
 
 LANGUAGES = ("pl", "en", "auto")
 MODES = ("hold", "toggle")
 DEVICES = ("auto", "cuda", "cpu")
-ENHANCEMENT_PROVIDERS = ("anthropic", "claude_cli")
 ENHANCEMENT_PROMPTS = ("default", "chat", "verbatim")
-
-# Offered in the tray. Haiku 4.5 leads because dictation is interactive: it is
-# the fastest current model, and cleaning a transcript is not a reasoning task.
-ENHANCEMENT_MODELS = (
-    "claude-haiku-4-5",
-    "claude-sonnet-5",
-)
 
 # Offered in the tray menu. Anything faster-whisper accepts still works if you
 # type it into the config by hand.

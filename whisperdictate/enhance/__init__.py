@@ -6,6 +6,16 @@ pasted rather than nothing.
 """
 
 from .service import EnhancementService, EnhancementResult
-from .providers import PROVIDERS, ProviderError
+from .providers import ProviderError
+from .registry import PROVIDERS, PROVIDER_KEYS, ProviderSpec, default_model, spec
 
-__all__ = ["EnhancementService", "EnhancementResult", "PROVIDERS", "ProviderError"]
+__all__ = [
+    "EnhancementService",
+    "EnhancementResult",
+    "ProviderError",
+    "PROVIDERS",
+    "PROVIDER_KEYS",
+    "ProviderSpec",
+    "default_model",
+    "spec",
+]

@@ -173,7 +173,29 @@ Prompt napisany po angielsku wycina „um" i zostawia „no więc yyy" nietknię
 Lista polskich wypełniaczy i zwrotów autopoprawki to funkcjonalny rdzeń, nie
 tłumaczenie.
 
-**Klucz API w Menedżerze poświadczeń, nie w configu.**
+**Rejestr providerów jest osobnym, bezimportowym modułem.**
+`enhance/registry.py` nie importuje niczego z pakietu, więc czytają go zarówno
+`config.py`, jak i `enhance/providers.py`, bez cyklu. Trzyma to, co odróżnia
+providerów: `base_url`, zmienną środowiskową klucza, listę modeli i jurysdykcję.
+
+**DeepSeek nie ma własnego klienta.**
+Wystawia endpoint zgodny z protokołem Anthropic Messages, więc `MessagesApiProvider`
+obsługuje oba — różni je wyłącznie `base_url` i klucz. Ignoruje `anthropic-beta`,
+`anthropic-version`, `top_k` i `cache_control`; nie wysyłamy żadnego z nich. Jego
+cache promptu jest automatyczny po stronie serwera, więc ignorowany `cache_control`
+nie kosztuje nas trafień w cache.
+
+**Zmiana providera przestawia model.**
+Nazwy modeli nie przenoszą się między providerami. Zostawienie `claude-haiku-4-5`
+po przejściu na DeepSeeka trafiłoby w cichy fallback ich API na `deepseek-v4-flash`
+— działa, ale konfiguracja kłamie o tym, co faktycznie działa.
+
+**Menu modeli używa predykatu `visible`, nie przebudowy.**
+Menu pystray jest niezmienne po zbudowaniu, ale `visible` jest wyliczane przy
+każdym wyświetleniu. Modele wszystkich providerów są zadeklarowane z góry i
+ukrywane, gdy ich provider nie jest wybrany.
+
+**Klucze API w Menedżerze poświadczeń, nie w configu — osobny wpis na providera.**
 `config.toml` to zwykły tekst w profilu roamingowym, nadpisywany przy każdym
 kliknięciu w tray. Menedżer poświadczeń szyfruje per użytkownik i trzyma klucz
 poza wszystkim, co da się przypadkiem udostępnić. `Persist` ustawione na

@@ -16,16 +16,9 @@ from PIL import Image, ImageDraw
 
 from .. import APP_NAME, paths
 from ..audio import DeviceInfo, list_input_devices, refresh_devices
-from ..config import (
-    ENHANCEMENT_MODELS,
-    ENHANCEMENT_PROMPTS,
-    ENHANCEMENT_PROVIDERS,
-    LANGUAGES,
-    MODEL_CHOICES,
-    Config,
-)
+from ..config import ENHANCEMENT_PROMPTS, ENHANCEMENT_PROVIDERS, LANGUAGES, MODEL_CHOICES, Config
 from ..controller import DictationController, State
-from ..enhance import PROVIDERS as PROVIDER_LABELS
+from ..enhance import PROVIDERS as PROVIDER_SPECS
 from ..enhance.prompts import PROMPT_LABELS
 
 log = logging.getLogger(__name__)
@@ -256,15 +249,33 @@ class Tray:
             )
 
         items += [
-            radio("enhancement.provider", key, PROVIDER_LABELS[key],
+            radio("enhancement.provider", key, PROVIDER_SPECS[key].label,
                   self.controller.set_enhancement_provider)
             for key in ENHANCEMENT_PROVIDERS
         ]
         items.append(pystray.Menu.SEPARATOR)
-        items += [
-            radio("enhancement.model", name, name, self.controller.set_enhancement_model)
-            for name in ENHANCEMENT_MODELS
-        ]
+
+        # Every provider's models are declared up front and hidden unless that
+        # provider is selected. pystray menus are immutable once built, but
+        # `visible` is re-evaluated on each display — so this stays correct
+        # after a provider switch without rebuilding the menu.
+        def model_entry(provider_key: str, model_name: str) -> pystray.MenuItem:
+            def select() -> None:
+                self.controller.set_enhancement_model(model_name)
+
+            return item(
+                model_name,
+                select,
+                checked=lambda _, m=model_name: self.config.get("enhancement.model") == m,
+                radio=True,
+                visible=lambda _, p=provider_key: self.config.get("enhancement.provider") == p,
+            )
+
+        for provider_key in ENHANCEMENT_PROVIDERS:
+            items += [
+                model_entry(provider_key, name)
+                for name in PROVIDER_SPECS[provider_key].models
+            ]
         items.append(pystray.Menu.SEPARATOR)
         items += [
             radio("enhancement.prompt", key, PROMPT_LABELS[key],
@@ -274,9 +285,21 @@ class Tray:
 
         if self._dispatcher is not None:
             items.append(pystray.Menu.SEPARATOR)
-            items.append(item("Ustaw klucz API...", self._set_api_key))
-            items.append(item("Usun klucz API", self._delete_api_key))
+            for provider_key in ENHANCEMENT_PROVIDERS:
+                if PROVIDER_SPECS[provider_key].env_var is None:
+                    continue  # the CLI needs no key
+                items.append(self._api_key_entry(provider_key))
         return items
+
+    def _api_key_entry(self, provider_key: str) -> pystray.MenuItem:
+        def open_dialog() -> None:
+            from . import dialogs
+
+            self._dispatcher.call(
+                lambda: dialogs.manage_api_key(self._dispatcher.root, provider_key)
+            )
+
+        return pystray.MenuItem(f"Klucz API: {provider_key}...", open_dialog)
 
     # -- actions --------------------------------------------------------
 
@@ -284,16 +307,6 @@ class Tray:
         self.controller.set_enhancement_enabled(
             not bool(self.config.get("enhancement.enabled"))
         )
-
-    def _set_api_key(self) -> None:
-        from . import dialogs
-
-        self._dispatcher.call(lambda: dialogs.ask_api_key(self._dispatcher.root))
-
-    def _delete_api_key(self) -> None:
-        from . import dialogs
-
-        self._dispatcher.call(lambda: dialogs.confirm_delete_api_key(self._dispatcher.root))
 
     def _refresh_devices(self) -> None:
         """Re-enumerate microphones and rebuild the menu around the new list."""

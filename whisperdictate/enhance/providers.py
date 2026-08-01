@@ -7,13 +7,14 @@ import subprocess
 from typing import Protocol
 
 from . import credentials
+from .registry import CLI, MESSAGES_API, PROVIDERS, ProviderSpec, spec
 
 log = logging.getLogger(__name__)
 
-# Models that run adaptive thinking when `thinking` is omitted. For a cleanup
+# Models that run adaptive thinking when `thinking` is omitted. For a clean-up
 # task thinking is pure latency, so these get it switched off explicitly.
-# Haiku 4.5 and other pre-4.6 models are absent on purpose: they do not think
-# unless asked, and they reject the `effort` parameter outright.
+# Haiku 4.5 and the DeepSeek models are absent on purpose: they do not think
+# unless asked, and Haiku 4.5 rejects the `effort` parameter outright.
 _THINKS_BY_DEFAULT = frozenset(
     {"claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5"}
 )
@@ -36,10 +37,16 @@ class Provider(Protocol):
         """Return a human-readable reason the provider is unusable, or None."""
 
 
-class AnthropicProvider:
-    """Direct Messages API call. Fast (~1 s on Haiku), needs an API key."""
+class MessagesApiProvider:
+    """Anthropic Messages API, or anything that speaks it at another base URL.
 
-    name = "anthropic"
+    DeepSeek's `/anthropic` endpoint is protocol-compatible, so it needs no
+    separate client — only a different `base_url` and a different key.
+    """
+
+    def __init__(self, provider: ProviderSpec):
+        self.spec = provider
+        self.name = provider.key
 
     def complete(self, system: str, user: str, model: str, timeout: float) -> str:
         try:
@@ -47,16 +54,19 @@ class AnthropicProvider:
         except ImportError as exc:
             raise ProviderError("Brak pakietu anthropic. Uruchom: pip install anthropic") from exc
 
-        key = credentials.get_api_key()
+        key = credentials.get_api_key(self.name)
         if not key:
             raise ProviderError(
-                "Brak klucza API. Ustaw go: .\\run.ps1 -SetApiKey (albo z menu tray)"
+                f"Brak klucza API ({self.name}). Ustaw go: .\\run.ps1 -SetApiKey {self.name}"
             )
 
         # max_retries=1: a dictation is interactive. Two retries with backoff can
         # outlast the user's patience, and the fail-soft path already pastes the
         # raw transcript.
-        client = anthropic.Anthropic(api_key=key, timeout=timeout, max_retries=1)
+        client_args = {"api_key": key, "timeout": timeout, "max_retries": 1}
+        if self.spec.base_url:
+            client_args["base_url"] = self.spec.base_url
+        client = anthropic.Anthropic(**client_args)
 
         request = {
             "model": model,
@@ -70,7 +80,7 @@ class AnthropicProvider:
         try:
             message = client.messages.create(**request)
         except anthropic.AuthenticationError as exc:
-            raise ProviderError(f"Klucz API odrzucony: {exc}") from exc
+            raise ProviderError(f"Klucz API ({self.name}) odrzucony: {exc}") from exc
         except anthropic.NotFoundError as exc:
             raise ProviderError(f"Nieznany model {model!r}: {exc}") from exc
         except anthropic.RateLimitError as exc:
@@ -84,25 +94,23 @@ class AnthropicProvider:
         # this has to be checked before reading content, not caught as an error.
         if message.stop_reason == "refusal":
             raise ProviderError("Model odmowil przetworzenia tej transkrypcji")
-
-        text = "".join(block.text for block in message.content if block.type == "text")
         if message.stop_reason == "max_tokens":
-            log.warning("Odpowiedz LLM ucieta na max_tokens - wklejam surowy tekst")
-            raise ProviderError("Odpowiedz LLM zostala ucieta")
-        return text
+            raise ProviderError("Odpowiedz LLM zostala ucieta na max_tokens")
+
+        return "".join(block.text for block in message.content if block.type == "text")
 
     def check(self) -> str | None:
         try:
             import anthropic  # noqa: F401
         except ImportError:
             return "brak pakietu anthropic"
-        if not credentials.get_api_key():
-            return "brak klucza API"
+        if not credentials.get_api_key(self.name):
+            return f"brak klucza API ({self.name})"
         return None
 
 
 class ClaudeCliProvider:
-    """Shells out to the Claude Code CLI. No API key, but ~6 s per call."""
+    """Shells out to the Claude Code CLI. No API key, but ~23 s per call."""
 
     name = "claude_cli"
 
@@ -150,16 +158,16 @@ class ClaudeCliProvider:
         return None
 
 
-PROVIDERS: dict[str, str] = {
-    "anthropic": "Anthropic API (szybkie, wymaga klucza)",
-    "claude_cli": "Claude Code CLI (bez klucza, wolniejsze)",
-}
+#: Menu labels, keyed the same as the registry.
+PROVIDERS_LABELS: dict[str, str] = {key: p.label for key, p in PROVIDERS.items()}
 
 
 def build(name: str, *, cli_path: str = "") -> Provider:
-    if name == "claude_cli":
+    provider = spec(name)
+    if provider.kind == CLI:
         return ClaudeCliProvider(cli_path)
-    return AnthropicProvider()
+    assert provider.kind == MESSAGES_API
+    return MessagesApiProvider(provider)
 
 
 def _max_tokens_for(user_text: str) -> int:

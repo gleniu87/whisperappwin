@@ -192,8 +192,17 @@ class DictationController:
         self._set_state(self._state)
 
     def set_enhancement_provider(self, provider: str) -> None:
-        self.config.set("enhancement.provider", provider)
-        log.info("Provider czyszczenia: %s", provider)
+        from .enhance import registry
+
+        self.config.set("enhancement.provider", provider, save=False)
+        # Model names do not carry across providers. Leaving claude-haiku-4-5
+        # selected after switching to DeepSeek would silently resolve to
+        # whatever that API maps unknown names to.
+        if not registry.supports_model(provider, self.config.get("enhancement.model", "")):
+            self.config.set("enhancement.model", registry.default_model(provider), save=False)
+        self.config.save()
+
+        log.info("Provider czyszczenia: %s / %s", provider, self.config.get("enhancement.model"))
         problem = self.enhancement.check()
         if problem and self.enhancement.enabled:
             self._notify(f"Provider {provider}: {problem}.", error=True)

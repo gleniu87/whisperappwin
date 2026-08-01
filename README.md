@@ -110,26 +110,48 @@ identyfikatorów, ścieżek, flag CLI ani `camelCase`.
 
 ### Który provider
 
-| | Anthropic API | Claude Code CLI |
-|---|---|---|
-| Czas na dyktowanie | **~1 s** (Haiku 4.5) | **~23 s** (zmierzone) |
-| Klucz API | wymagany | niepotrzebny |
-| Koszt | ułamki grosza za dyktowanie | Twoja subskrypcja |
+| | Anthropic API | DeepSeek API | Claude Code CLI |
+|---|---|---|---|
+| Model domyślny | `claude-haiku-4-5` | `deepseek-v4-flash` | `claude-haiku-4-5` |
+| Input / 1M | $1.00 | **$0.14** | — |
+| Output / 1M | $5.00 | **$0.28** | — |
+| Koszt / dyktowanie | ~$0.0026 | ~$0.00025 | subskrypcja |
+| Czas | ~1 s | zmierz sam | **~23 s** (zmierzone) |
+| Klucz API | wymagany | wymagany | **niepotrzebny** |
+| Ruch idzie do | Anthropic (USA) | **DeepSeek (Chiny)** | Anthropic (Twoja subskrypcja) |
 
-API jest domyślne — przy dyktowaniu opóźnienie jest odczuwalne od razu. CLI to
-opcja, gdy nie chcesz zarządzać kluczem.
+DeepSeek jest ~10× tańszy i mówi protokołem Anthropic Messages pod innym
+`base_url`, więc obsługuje go ten sam klient. Cache promptu też działa lepiej:
+minimalny cache'owalny prefiks Anthropic dla Haiku 4.5 to 4096 tokenów, a nasz
+prompt systemowy ma ~1100 — czyli u Anthropic **cache w ogóle nie zadziała**,
+a DeepSeek cache'uje automatycznie bez progu.
 
-### Klucz API
+**Zanim włączysz DeepSeeka: ruch idzie na serwery w Chinach.** Do treści
+służbowych używaj Claude Code CLI (idzie przez Twoją subskrypcję) albo wyłącz
+czyszczenie zupełnie.
 
-Nie trafia do pliku konfiguracyjnego. Ląduje w **Menedżerze poświadczeń Windows**,
-szyfrowany per użytkownik:
+Nie zgaduj, który jest najlepszy — zmierz na swoim tekście:
 
 ```powershell
-.\run.ps1 -SetApiKey
+.\run.ps1 -Benchmark "no wiec yyy wyslij to do Marka znaczy do Marcina"
 ```
 
-Albo z menu tray → *Czyszczenie tekstu* → *Ustaw klucz API…*. Zmienna
-`ANTHROPIC_API_KEY` ma pierwszeństwo, jeśli ustawiona.
+Przepuszcza ten sam tekst przez każdego gotowego providera i wypisuje czasy oraz
+wyniki obok siebie.
+
+### Klucze API
+
+Nie trafiają do pliku konfiguracyjnego. Lądują w **Menedżerze poświadczeń
+Windows**, szyfrowane per użytkownik, osobny wpis na providera:
+
+```powershell
+.\run.ps1 -SetApiKey anthropic
+.\run.ps1 -SetApiKey deepseek
+```
+
+Albo z menu tray → *Czyszczenie tekstu* → *Klucz API: …*. Zmienne
+`ANTHROPIC_API_KEY` i `DEEPSEEK_API_KEY` mają pierwszeństwo; każdy provider
+czyta wyłącznie swoją, więc jedna nie przesłania drugiej.
 
 ### Zasada fail-soft
 

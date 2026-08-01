@@ -199,6 +199,18 @@ def prompt_section(raw: str | None) -> str:
     names = terms(raw)
     if not names:
         return ""
+    # "odmien ja naturalnie po polsku" stays, and it is not an oversight left
+    # over from a Polish-only version. It reads wrong for English dictation, so
+    # it was rewritten language-neutral - and that was measured, twice, as worse:
+    #
+    #   deepseek-v4-flash, same text, "Sonnet" restored correctly
+    #     Polish   "po polsku" 14/16   neutral 9/16
+    #     English  "po polsku"   8/8   neutral   8/8
+    #
+    # English never needed the fix: the language lock appended after this section
+    # already overrides the Polish instruction. Polish, meanwhile, loses a third
+    # of its hit rate without the concrete grammatical cue. One list, one
+    # section, and the base-form terms get declined correctly in both languages.
     return (
         "\n\nNAZWY WLASNE uzywane przez mowiacego: "
         + ", ".join(names)

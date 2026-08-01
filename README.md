@@ -134,6 +134,28 @@ Zmierzony efekt drugiej połowy (`deepseek-v4-flash`, ten sam tekst, po 3 przebi
 Wpływ na priming Whispera nie został zmierzony — to udokumentowane zachowanie
 `initial_prompt`, nie pomiar na konkretnym głosie.
 
+#### Jeden słownik na oba języki
+
+Dyktujesz po polsku i po angielsku z **tej samej listy**. Nazwy zapisujesz
+w **formie podstawowej** (`DeepSeek`, nie `DeepSeeka`) — model odmienia je sam
+i robi to zgodnie z językiem zdania:
+
+| dyktowanie | w słowniku | w wyniku |
+|---|---|---|
+| „przełączmy na dipsicka" | `DeepSeek` | „przełączmy na **DeepSeeka**" |
+| „switch to dipsick" | `DeepSeek` | „switch to **DeepSeek**" |
+
+Dwa słowniki nie są potrzebne i byłyby kłopotliwe: `transcription.language`
+przyjmuje `auto`, więc przy autodetekcji nie dałoby się wybrać właściwej listy
+przed transkrypcją. Whisper i tak dostaje jeden `initial_prompt`, a nazwy własne
+brzmią zwykle tak samo w obu językach.
+
+Sekcja słownika w prompcie jest po polsku i **celowo** każe odmieniać po polsku,
+mimo że dla angielskiego brzmi to bez sensu. Przepisanie jej na neutralną
+językowo zostało zmierzone i wypadło **gorzej**: polski spadł z 14/16 na 9/16
+przy odtwarzaniu `Sonnet`, a angielski i tak był 8/8 w obu wersjach — bo lock
+językowy doklejany na końcu promptu i tak nadpisuje tę instrukcję.
+
 #### Słownik, który uzupełnia się sam
 
 Czasem model czyszczący **sam** rozpozna przekręconą nazwę z kontekstu — tak Sonnet

@@ -76,6 +76,16 @@ class PromptSectionTest(unittest.TestCase):
         """Without this guard a model starts sprinkling the list into transcripts."""
         self.assertIn("NIE dopisuj", vocabulary.prompt_section("DeepSeek"))
 
+    def test_section_keeps_the_polish_declension_cue(self):
+        """Looks like a bug for English dictation. Measured, removing it is worse.
+
+        Rewriting this language-neutral dropped Polish from 14/16 to 9/16 on
+        restoring "Sonnet" (deepseek-v4-flash), while English stayed 8/8 either
+        way - the language lock appended later already handles English. Do not
+        "fix" this without re-running that comparison.
+        """
+        self.assertIn("po polsku", vocabulary.prompt_section("DeepSeek"))
+
 
 class DetectTest(unittest.TestCase):
     """Finding names the clean-up model repaired on its own.

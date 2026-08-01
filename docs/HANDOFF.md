@@ -193,6 +193,21 @@ lądowały w słowniku bez potwierdzenia, błędny wpis trafiłby do `initial_pr
 i psuł **wszystkie** przyszłe dyktowania, w dodatku u źródła. Nie „usprawniaj"
 tego na automatyczne dodawanie.
 
+**Sekcja słownika w prompcie każe odmieniać „po polsku" i tak ma zostać.**
+Wygląda na przeoczenie z czasów, gdy aplikacja była tylko polska — użytkownik
+dyktuje też po angielsku, więc instrukcja jest tam bez sensu. **Przepisałem ją
+na neutralną językowo i zmierzyłem: jest gorzej.** Polski spadł z 14/16 na 9/16
+przy odtwarzaniu `Sonnet` (deepseek-v4-flash, ten sam tekst), angielski 8/8
+w obu wersjach. Angielski nie potrzebował naprawy, bo `language_directive` jest
+doklejany PO tej sekcji i ją nadpisuje. Cofnięte. Pilnuje tego
+`test_section_keeps_the_polish_declension_cue`. Nie „naprawiaj" tego bez
+powtórzenia pomiaru.
+
+**Jeden słownik na oba języki, nazwy w formie podstawowej.** Model odmienia sam
+(`DeepSeek` → „na DeepSeeka" po polsku, „to DeepSeek" po angielsku). Dwóch list
+nie da się rozsądnie zrobić: `transcription.language` przyjmuje `auto`, więc przy
+autodetekcji nie wiadomo, którą wybrać przed transkrypcją.
+
 **`_fold()` ręcznie mapuje `ł` → `l`.** To nie jest nadgorliwość: `ł` (U+0142) to
 atomowy codepoint **bez dekompozycji NFD**, w przeciwieństwie do ą, ć, ę, ń, ó, ś,
 ź, ż. Bez tej mapy „ustawilem" i „ustawiłem" porównują się jako różne słowa,

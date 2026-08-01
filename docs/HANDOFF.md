@@ -203,6 +203,13 @@ doklejany PO tej sekcji i ją nadpisuje. Cofnięte. Pilnuje tego
 `test_section_keeps_the_polish_declension_cue`. Nie „naprawiaj" tego bez
 powtórzenia pomiaru.
 
+**Słownik ma dwa źródła i one się ŁĄCZĄ, nie zastępują.** `vocabulary.txt`
+w repo (wersjonowane nazwy techniczne) + `transcription.vocabulary` w `%APPDATA%`
+(prywatne: klienci, projekty, osoby — poza gitem). Każde czytanie słownika idzie
+przez `vocabulary.combined()`. Jeśli gdzieś zobaczysz gołe
+`config.get("transcription.vocabulary")` w ścieżce, która karmi Whispera albo
+prompt — to błąd, gubi połowę listy.
+
 **Jeden słownik na oba języki, nazwy w formie podstawowej.** Model odmienia sam
 (`DeepSeek` → „na DeepSeeka" po polsku, „to DeepSeek" po angielsku). Dwóch list
 nie da się rozsądnie zrobić: `transcription.language` przyjmuje `auto`, więc przy

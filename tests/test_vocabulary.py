@@ -5,7 +5,9 @@ parsing has to survive both: Whisper wants priming prose, the LLM wants an
 instruction with a guard against inventing names that were never said.
 """
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from whisperdictate import vocabulary
 from whisperdictate.enhance import prompts
@@ -18,8 +20,8 @@ class TermsTest(unittest.TestCase):
     def test_keeps_multi_word_names_intact(self):
         """Whitespace is not a separator — "Claude Code" is one name, not two."""
         self.assertEqual(
-            vocabulary.terms("Claude Code, ICE InsureTech"),
-            ("Claude Code", "ICE InsureTech"),
+            vocabulary.terms("Claude Code, Visual Studio"),
+            ("Claude Code", "Visual Studio"),
         )
 
     def test_collapses_inner_whitespace(self):
@@ -39,6 +41,64 @@ class TermsTest(unittest.TestCase):
     def test_case_is_preserved(self):
         """Casing is the point: getUserProfile is not GetUserProfile."""
         self.assertEqual(vocabulary.terms("DeepSeek"), ("DeepSeek",))
+
+
+class SharedFileTest(unittest.TestCase):
+    """The repository half of the vocabulary.
+
+    Split in two on purpose: technical names are worth version-controlling and
+    sharing across machines, client and project names are not.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = Path(self._tmp.name) / "vocabulary.txt"
+
+    def test_file_form_accepts_newlines_as_separators(self):
+        self.assertEqual(vocabulary.terms("A\nB, C\nD"), ("A", "B", "C", "D"))
+
+    def test_comments_are_stripped(self):
+        raw = "# naglowek\nDeepSeek, Sonnet  # koniec linii\n# calkiem\nKubernetes"
+        self.assertEqual(vocabulary.terms(raw), ("DeepSeek", "Sonnet", "Kubernetes"))
+
+    def test_a_comment_only_file_yields_nothing(self):
+        self.assertEqual(vocabulary.terms("# tylko komentarz\n\n"), ())
+
+    def test_missing_file_is_not_an_error(self):
+        """A vanished shared file must degrade to "no shared terms"."""
+        self.assertEqual(vocabulary.read_shared(self.path), "")
+
+    def test_reads_an_existing_file(self):
+        self.path.write_text("DeepSeek, Sonnet", encoding="utf-8")
+        self.assertEqual(vocabulary.read_shared(self.path), "DeepSeek, Sonnet")
+
+    def test_combined_merges_both_sources(self):
+        self.assertEqual(
+            vocabulary.combined("Klient Kowalski", "DeepSeek, Sonnet"),
+            "DeepSeek, Sonnet, Klient Kowalski",
+        )
+
+    def test_combined_deduplicates_across_sources(self):
+        self.assertEqual(vocabulary.combined("DeepSeek", "DeepSeek, Sonnet"),
+                         "DeepSeek, Sonnet")
+
+    def test_combined_works_with_either_side_empty(self):
+        self.assertEqual(vocabulary.combined("", "DeepSeek"), "DeepSeek")
+        self.assertEqual(vocabulary.combined("Prywatna", ""), "Prywatna")
+        self.assertEqual(vocabulary.combined("", ""), "")
+
+    def test_the_repository_file_exists_and_parses(self):
+        """The shipped vocabulary.txt must be readable, not just present."""
+        shipped = vocabulary.read_shared()
+        self.assertTrue(shipped.strip(), "vocabulary.txt jest pusty")
+        self.assertIn("DeepSeek", vocabulary.terms(shipped))
+
+    def test_the_repository_file_carries_no_private_names(self):
+        """Guard against a client name reaching version control by habit."""
+        shipped = vocabulary.read_shared().lower()
+        for private in ("insuretech", "tomasz", "glen"):
+            self.assertNotIn(private, shipped)
 
 
 class WhisperPrimingTest(unittest.TestCase):

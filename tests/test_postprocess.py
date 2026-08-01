@@ -33,8 +33,8 @@ class ReplacementsTest(unittest.TestCase):
 
     def test_multi_word_key(self):
         self.assertEqual(
-            apply_replacements("pracuje w ajs insure tech", {"ajs insure tech": "ICE InsureTech"}),
-            "pracuje w ICE InsureTech",
+            apply_replacements("stawiam elastik serc", {"elastik serc": "Elasticsearch"}),
+            "stawiam Elasticsearch",
         )
 
     def test_replacement_value_is_literal_not_a_regex_template(self):

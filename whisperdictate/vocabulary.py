@@ -23,9 +23,13 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from pathlib import Path
+
+#: Version-controlled half of the vocabulary, in the repository root.
+SHARED_FILE = "vocabulary.txt"
 
 #: Splitting on commas only. Proper nouns contain spaces ("Claude Code",
-#: "ICE InsureTech"), so whitespace is not a separator.
+#: "Visual Studio"), so whitespace is not a separator.
 _SEPARATOR = ","
 
 #: Below this, two words are not the same word misheard - they are two words.
@@ -39,15 +43,55 @@ _WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 
 def terms(raw: str | None) -> tuple[str, ...]:
-    """Parse the configured list. Order is the user's; duplicates collapse."""
+    """Parse the configured list. Order is the user's; duplicates collapse.
+
+    Newlines count as separators too, so the same parser reads both the config
+    string and the repository file.
+    """
     if not raw:
         return ()
     seen: dict[str, None] = {}
-    for chunk in str(raw).split(_SEPARATOR):
-        term = " ".join(chunk.split())
-        if term:
-            seen.setdefault(term, None)
+    text = str(raw)
+    for line in text.splitlines():
+        line = line.split("#", 1)[0]  # comments, for the file form
+        for chunk in line.split(_SEPARATOR):
+            term = " ".join(chunk.split())
+            if term:
+                seen.setdefault(term, None)
     return tuple(seen)
+
+
+def shared_path() -> Path:
+    """`vocabulary.txt` next to the package, i.e. in the repository."""
+    return Path(__file__).resolve().parent.parent / SHARED_FILE
+
+
+def read_shared(path: Path | None = None) -> str:
+    """The version-controlled list, or "" when absent or unreadable.
+
+    Never raises: a missing or broken shared file must degrade to "no shared
+    terms", not break dictation.
+    """
+    target = path if path is not None else shared_path()
+    try:
+        return target.read_text(encoding="utf-8")
+    except (OSError, ValueError, UnicodeDecodeError):
+        return ""
+
+
+def combined(config_raw: str | None, shared_raw: str | None = None) -> str:
+    """Shared list plus the private one, as a single comma-separated string.
+
+    Two sources on purpose. Technical names are worth sharing across machines and
+    belong in the repository; client and project names are not, and stay in
+    `%APPDATA%` where version control never sees them.
+    """
+    shared = read_shared() if shared_raw is None else shared_raw
+    merged = ""
+    for source in (shared, config_raw):
+        for term in terms(source):
+            merged = add(merged, term)
+    return merged
 
 
 def whisper_priming(raw: str | None, initial_prompt: str | None = "") -> str:

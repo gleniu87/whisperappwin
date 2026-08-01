@@ -98,7 +98,7 @@ def build_transcriber(config: Config) -> Transcriber:
         beam_size=int(config.get("transcription.beam_size", 5)),
         vad_filter=bool(config.get("transcription.vad_filter", True)),
         initial_prompt=vocabulary.whisper_priming(
-            config.get("transcription.vocabulary", ""),
+            vocabulary.combined(config.get("transcription.vocabulary", "")),
             config.get("transcription.initial_prompt", ""),
         ),
     )
@@ -373,13 +373,17 @@ def cmd_suggest_vocabulary(config: Config) -> int:
 
     history = History(paths.history_path(), enabled=True)
     entries = history.recent(1000)
-    known = config.get("transcription.vocabulary", "")
+    private = config.get("transcription.vocabulary", "")
+    shared = vocabulary.read_shared()
+    known = vocabulary.combined(private, shared)
     found = vocabulary.pending(entries, known, config.get("transcription.vocabulary_rejected", ""))
 
     paired = sum(1 for e in entries if e.get("raw_text"))
     print(f"Przejrzano {len(entries)} wpisow historii ({paired} z czyszczeniem).")
-    if known:
-        print(f"W slowniku juz: {', '.join(vocabulary.terms(known))}")
+    if shared.strip():
+        print(f"Wspolne ({vocabulary.SHARED_FILE}): {', '.join(vocabulary.terms(shared))}")
+    if private:
+        print(f"Prywatne (config): {', '.join(vocabulary.terms(private))}")
 
     if not found:
         print("\nBrak nowych kandydatow.")

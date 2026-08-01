@@ -140,12 +140,27 @@ Whisper nie zna nazw, których nie ma powodu się spodziewać: „DeepSeek" wrac
 `Dipsick`, `dipsyka`, `Deepsika`. Model czyszczący zwykle tego nie naprawi — nie
 ma się czego uchwycić, a zgadywanie byłoby halucynacją.
 
-Menu tray → *Czyszczenie tekstu* → **Nazwy wlasne...** (albo `transcription.vocabulary`).
-Lista po przecinku, nazwy wieloczłonowe dozwolone:
+Słownik ma **dwie części, które się łączą**:
+
+| | gdzie | co tam trzymać |
+|---|---|---|
+| wspólna | [`vocabulary.txt`](vocabulary.txt) w repo, **wersjonowana** | nazwy techniczne i publiczne — narzędzia, biblioteki, modele |
+| prywatna | `transcription.vocabulary` w `%APPDATA%`, **poza gitem** | nazwy klientów, projektów i osób |
+
+Podział jest celowy: wspólną bazę techniczną warto wersjonować i mieć na każdej
+maszynie, a nazw z pracy nie chcesz wypchnąć na GitHuba jednym `git push`.
+`config.toml` jest w `.gitignore` od pierwszego commita.
+
+Prywatną część edytujesz z menu tray → *Czyszczenie tekstu* → **Nazwy wlasne...**,
+wspólną — zwykłym edytorem. Format obu jest ten sam: po przecinku albo po jednej
+w linii, `#` zaczyna komentarz, nazwy wieloczłonowe dozwolone.
 
 ```
-DeepSeek, Claude Code, Anthropic, ICE InsureTech, Tomasz Glen
+DeepSeek, Claude Code, Anthropic, Kubernetes, Terraform
 ```
+
+Nazwy zapisuj w **formie podstawowej** (`Anthropic`, nie `Anthropica`) — odmianą
+zajmuje się model.
 
 Jedna lista trafia w **dwa** miejsca:
 

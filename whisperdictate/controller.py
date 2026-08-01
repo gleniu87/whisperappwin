@@ -209,7 +209,7 @@ class DictationController:
 
         self.config.set("transcription.vocabulary", raw)
         self.transcriber.initial_prompt = vocabulary.whisper_priming(
-            raw, self.config.get("transcription.initial_prompt", "")
+            vocabulary.combined(raw), self.config.get("transcription.initial_prompt", "")
         ) or None
         log.info("Slownik nazw wlasnych: %d pozycji", len(vocabulary.terms(raw)))
         self._set_state(self._state)
@@ -369,7 +369,8 @@ class DictationController:
             return
         self._pending_vocabulary = vocabulary.pending(
             entries,
-            self.config.get("transcription.vocabulary", ""),
+            # Combined: a name already in the shared file must not be offered.
+            vocabulary.combined(self.config.get("transcription.vocabulary", "")),
             self.config.get("transcription.vocabulary_rejected", ""),
         )
 

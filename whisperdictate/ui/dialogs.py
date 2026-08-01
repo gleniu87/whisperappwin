@@ -64,7 +64,7 @@ def edit_vocabulary(root: tk.Tk, controller) -> None:  # noqa: ANN001 - avoids a
         answer = simpledialog.askstring(
             "WhisperDictate - nazwy wlasne",
             "Nazwy, ktore Whisper przekreca, po przecinku.\n"
-            "Np.: DeepSeek, Claude Code, ICE InsureTech\n\n"
+            "Np.: DeepSeek, Claude Code, Kubernetes\n\n"
             "Trafiaja do Whispera (zeby uslyszal je poprawnie)\n"
             "i do modelu czyszczacego (zeby naprawil te przekrecone).",
             initialvalue=current,

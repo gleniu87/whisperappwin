@@ -74,7 +74,11 @@ initial_prompt = ""
 # mangled and does nothing when clean-up is off.
 #
 # Changeable from the tray: Czyszczenie tekstu > Nazwy wlasne...
-# Example: "DeepSeek, Claude Code, Anthropic, ICE InsureTech, Tomasz Glen"
+# Example: "DeepSeek, Claude Code, Anthropic, Kubernetes, Terraform"
+#
+# Names shared across machines belong in vocabulary.txt in the repository
+# instead; the two lists are merged. Keep client and project names here, where
+# they stay out of version control.
 vocabulary = ""
 
 [audio]
@@ -171,4 +175,4 @@ cli_path = ""
 # Case-insensitive; alphanumeric keys match on word boundaries only.
 [replacements]
 # "kubernetes" = "Kubernetes"
-# "ajs insure tech" = "ICE InsureTech"
+# "elastik serc" = "Elasticsearch"

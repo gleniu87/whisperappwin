@@ -115,10 +115,12 @@ class EnhancementService:
             return None
 
         provider = self._provider()
+        from ..vocabulary import combined
+
         system = prompts.build(
             self.config.get("enhancement.prompt", "default"),
             language,
-            self.config.get("transcription.vocabulary", ""),
+            combined(self.config.get("transcription.vocabulary", "")),
         )
         user = prompts.wrap_transcript(text)
         timeout = float(self.config.get("enhancement.timeout_seconds", 30))

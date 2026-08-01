@@ -1,0 +1,25 @@
+# Nazwy wlasne, ktore Whisper przekreca - czesc WSPOLNA, w repozytorium.
+#
+# Ta lista jest wersjonowana i dzielona miedzy maszyny. Trzymaj tu nazwy
+# techniczne i publiczne: narzedzia, biblioteki, firmy z branzy.
+#
+# Nazwy klientow, projektow i osob NIE nalezy tu wpisywac - na to jest
+# `transcription.vocabulary` w %APPDATA%\WhisperDictateWin\config.toml,
+# ktory nie trafia do gita. Obie listy sa laczone.
+#
+# Format: po przecinku albo po jednej w linii. Nazwy wieloczlonowe sa OK.
+# `#` zaczyna komentarz. Zapisuj w formie PODSTAWOWEJ (mianownik) - model
+# odmienia je sam, zgodnie z jezykiem zdania.
+
+# Modele i dostawcy LLM
+Anthropic, Claude, Claude Code, DeepSeek, Sonnet, Haiku, Opus
+OpenAI, Whisper, Hugging Face
+
+# Stos tego projektu
+faster-whisper, CTranslate2, PortAudio, WASAPI, DirectSound
+Python, PowerShell, pystray, pynput
+
+# Ogolnie techniczne
+Kubernetes, Terraform, Docker, PostgreSQL, Elasticsearch, Redis
+GitHub, GitLab, Jira, Confluence
+TypeScript, JavaScript, React, Node.js

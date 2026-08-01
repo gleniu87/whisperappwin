@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from whisperdictate import i18n
 from whisperdictate.config import Config
 from whisperdictate.controller import DictationController
 from whisperdictate.enhance import credentials, providers, registry
@@ -35,11 +36,23 @@ class RegistryTest(unittest.TestCase):
 
     def test_every_provider_declares_where_traffic_goes(self):
         """Hosting is a decision input, not a footnote — it must never be blank."""
-        for key, provider_spec in registry.PROVIDERS.items():
-            self.assertTrue(provider_spec.hosting.strip(), key)
+        for key in registry.PROVIDERS:
+            self.assertTrue(registry.hosting(key).strip(), key)
 
-    def test_deepseek_hosting_note_flags_the_jurisdiction(self):
-        self.assertIn("Chiny", registry.spec("deepseek").hosting)
+    def test_hosting_note_flags_the_jurisdiction_in_both_languages(self):
+        """The one fact that must survive translation, because acting on the
+        wrong reading of it means sending work material to another country."""
+        i18n.use("pl")
+        self.assertIn("Chiny", registry.hosting("deepseek"))
+        i18n.use("en")
+        self.assertIn("China", registry.hosting("deepseek"))
+
+    def test_menu_label_carries_the_product_name_and_the_hint(self):
+        i18n.use("pl")
+        self.assertEqual(registry.label_with_hint("deepseek"), "DeepSeek API (~10x tańszy)")
+
+    def test_hosting_of_an_unknown_provider_describes_the_fallback(self):
+        self.assertEqual(registry.hosting("nonsense"), registry.hosting(registry.DEFAULT_PROVIDER))
 
     def test_unknown_provider_falls_back_to_the_default(self):
         self.assertEqual(registry.spec("nonsense").key, registry.DEFAULT_PROVIDER)

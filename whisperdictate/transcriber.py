@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from . import paths, runtime_cuda
+from .i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -92,9 +93,7 @@ class Transcriber:
             try:
                 from faster_whisper import WhisperModel
             except ImportError as exc:
-                raise TranscriptionError(
-                    "Brak pakietu faster-whisper. Uruchom: pip install -r requirements.txt"
-                ) from exc
+                raise TranscriptionError(t("error.no_faster_whisper")) from exc
 
             device, compute = self._resolve_backend()
             started = time.perf_counter()
@@ -103,14 +102,16 @@ class Transcriber:
                 self._model = self._construct(WhisperModel, device, compute)
             except Exception as exc:  # noqa: BLE001 - ctranslate2 raises bare RuntimeError
                 if device != "cuda":
-                    raise TranscriptionError(f"Nie moge zaladowac modelu {self.model_name}: {exc}") from exc
+                    raise TranscriptionError(
+                        t("error.model_load", model=self.model_name, error=exc)
+                    ) from exc
                 log.warning("Model nie wystartowal na CUDA (%s) - przechodze na CPU", exc)
                 device, compute = "cpu", self._compute_for("cpu")
                 try:
                     self._model = self._construct(WhisperModel, device, compute)
                 except Exception as cpu_exc:  # noqa: BLE001
                     raise TranscriptionError(
-                        f"Nie moge zaladowac modelu {self.model_name} ani na GPU, ani na CPU: {cpu_exc}"
+                        t("error.model_load_anywhere", model=self.model_name, error=cpu_exc)
                     ) from cpu_exc
 
             self._active_device, self._active_compute = device, compute
@@ -175,7 +176,7 @@ class Transcriber:
                 )
                 text = " ".join(segment.text.strip() for segment in segments).strip()
         except Exception as exc:  # noqa: BLE001 - ctranslate2 raises bare RuntimeError
-            raise TranscriptionError(f"Transkrypcja nie powiodla sie: {exc}") from exc
+            raise TranscriptionError(t("error.transcription_failed", error=exc)) from exc
 
         result = TranscriptionResult(
             text=text,

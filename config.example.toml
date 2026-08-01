@@ -111,7 +111,27 @@ restore_clipboard = true
 # app (Teams, some Electron editors) occasionally pastes stale content.
 paste_delay_ms = 120
 
+# May a dictation be kept in the Windows clipboard history (Win+V) and synced to
+# the cloud clipboard? Off by default, because restore_clipboard above puts the
+# previous content back but cannot remove the history entry - so every dictation
+# was piling up in Win+V. The clipboard is still used either way: that is how
+# Ctrl+V works. Set it to true if you want dictations in Win+V on purpose.
+clipboard_history = false
+
 [ui]
+# Interface language: tray menu, recording overlay, dialogs. "pl" | "en".
+#
+# The first run takes it from Windows - the *display* language, not the region -
+# and settles on "en" if that is neither Polish nor English. What lands here is
+# always a concrete value, never "auto", so you can see what the app chose;
+# a config written before this key existed gains it once, on the next start.
+# Change it from the tray menu -> Jezyk aplikacji / App language.
+#
+# NOT the dictation language: that is [transcription].language, and the two are
+# deliberately independent - dictating in English through a Polish menu is a
+# perfectly normal thing to want.
+language = "pl"
+
 # Floating always-on-top recording indicator.
 overlay = true
 
@@ -120,7 +140,21 @@ sounds = true
 
 [history]
 # Append every transcription to %APPDATA%\WhisperDictateWin\history.jsonl
+#
+# This is also what "Skopiuj ostatnia transkrypcje" / "Copy last transcription"
+# in the tray reads - the way back when Ctrl+V went into a window with no text
+# field. Setting this to false hides that entry, because it would have nothing
+# to hand back.
 enabled = true
+
+# The file is trimmed to this many entries (checked every 100 appends), so it
+# does not grow without bound. Measured on real data: ~871 B per entry on
+# average, so 5000 entries is a ceiling of about 4.2 MB. 2000 -> ~1.7 MB,
+# 1000 -> ~0.83 MB.
+#
+# Careful below ~1000: every dictation scans the last 300 entries for proper
+# nouns the clean-up model repaired, and --suggest-vocabulary reads 1000. A
+# smaller history means fewer suggestions, not just a smaller file.
 max_entries = 5000
 
 # LLM clean-up of the transcript before pasting: removes fillers ("yyy", "no

@@ -15,6 +15,8 @@ from dataclasses import dataclass
 import numpy as np
 import sounddevice as sd
 
+from .i18n import t
+
 log = logging.getLogger(__name__)
 
 TARGET_RATE = 16_000
@@ -248,7 +250,7 @@ class Recorder:
             device = find_device(spec)
 
         if device is None:
-            self.fallback_note = f"Nie znaleziono mikrofonu {spec!r} - nagrywam z domyslnego systemowego"
+            self.fallback_note = t("error.device_missing", device=repr(spec))
             log.warning("%s", self.fallback_note)
             return None
 
@@ -333,7 +335,7 @@ class Recorder:
                     self._format_cache[cache_key] = (index, samplerate, channels)
                 return stream, samplerate, channels
 
-        raise AudioError("Nie moge otworzyc mikrofonu. Probowane formaty: " + "; ".join(failures))
+        raise AudioError(t("error.microphone_open", failures="; ".join(failures)))
 
     def _try_open(
         self, index: int | None, samplerate: int, channels: int, failures: list[str]

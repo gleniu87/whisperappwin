@@ -7,7 +7,8 @@ import re
 import time
 from dataclasses import dataclass
 
-from . import prompts, providers
+from ..i18n import t
+from . import prompts, providers, registry
 from .providers import ProviderError
 
 log = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ class EnhancementService:
     @property
     def provider_name(self) -> str:
         name = self.config.get("enhancement.provider", "anthropic")
-        return name if name in providers.PROVIDERS else "anthropic"
+        return name if name in registry.PROVIDERS else "anthropic"
 
     @property
     def model(self) -> str:
@@ -96,7 +97,7 @@ class EnhancementService:
 
     def describe(self) -> str:
         if not self.enabled:
-            return "wylaczone"
+            return t("enhancement.disabled")
         return f"{self.provider_name} / {self.model}"
 
     def check(self) -> str | None:

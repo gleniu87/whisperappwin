@@ -6,8 +6,9 @@ import logging
 import subprocess
 from typing import Protocol
 
+from ..i18n import t
 from . import credentials
-from .registry import CLI, MESSAGES_API, PROVIDERS, ProviderSpec, spec
+from .registry import CLI, MESSAGES_API, ProviderSpec, spec
 
 log = logging.getLogger(__name__)
 
@@ -121,12 +122,13 @@ class MessagesApiProvider:
         return text
 
     def check(self) -> str | None:
+        """Translated: this one goes into a tray balloon, unlike ProviderError."""
         try:
             import anthropic  # noqa: F401
         except ImportError:
-            return "brak pakietu anthropic"
+            return t("provider.problem.no_package")
         if not credentials.get_api_key(self.name):
-            return f"brak klucza API ({self.name})"
+            return t("provider.problem.no_key", provider=self.name)
         return None
 
 
@@ -184,12 +186,8 @@ class ClaudeCliProvider:
         import shutil
 
         if shutil.which(self.executable) is None:
-            return f"nie znaleziono {self.executable!r} w PATH"
+            return t("provider.problem.not_in_path", executable=repr(self.executable))
         return None
-
-
-#: Menu labels, keyed the same as the registry.
-PROVIDERS_LABELS: dict[str, str] = {key: p.label for key, p in PROVIDERS.items()}
 
 
 def build(name: str, *, cli_path: str = "") -> Provider:

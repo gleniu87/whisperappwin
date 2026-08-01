@@ -15,11 +15,15 @@ from typing import Any
 
 import tomli_w
 
-# Import-free module by design, so this cannot cycle back into config.
+# Both import-free by design, so neither can cycle back into config.
 from .enhance.registry import PROVIDER_KEYS as ENHANCEMENT_PROVIDERS
+from .i18n import UI_LANGUAGES, detect_system_language
 
 log = logging.getLogger(__name__)
 
+#: Dictation languages. Not the same list as i18n.UI_LANGUAGES: "auto" makes
+#: sense for speech and not for a menu, and dictating in English through a Polish
+#: interface is normal.
 LANGUAGES = ("pl", "en", "auto")
 MODES = ("hold", "toggle")
 DEVICES = ("auto", "cuda", "cpu")
@@ -72,8 +76,18 @@ DEFAULTS: dict[str, Any] = {
         "auto_paste": True,
         "restore_clipboard": True,
         "paste_delay_ms": 120,
+        # Whether a dictation may be kept in the Windows clipboard history
+        # (Win+V) and synced to the cloud clipboard. Off, because restoring the
+        # previous clipboard content does not remove the history entry, so every
+        # dictation was accumulating there. The clipboard itself is still used -
+        # that is how Ctrl+V works.
+        "clipboard_history": False,
     },
     "ui": {
+        # None means "not chosen yet". _resolve_ui_language() replaces it with the
+        # system's language on first run, so what lands in config.toml is always
+        # a concrete "pl" or "en" the user can read and edit.
+        "language": None,
         "overlay": True,
         "sounds": True,
     },
@@ -125,6 +139,9 @@ class Config:
     def __init__(self, path: Path, data: dict[str, Any]):
         self.path = path
         self._data = data
+        #: Set by _resolve_ui_language() when it had to guess, so load() can
+        #: write the guess down instead of repeating it on every start.
+        self._guessed_ui_language = False
 
     # -- construction ---------------------------------------------------
 
@@ -142,6 +159,13 @@ class Config:
         if not path.exists():
             cfg.save()
             log.info("Utworzono domyslny config: %s", path)
+        elif cfg._guessed_ui_language:
+            # A config written before ui.language existed. Write the guess down
+            # once, so the file says what the app is doing and the setting is
+            # findable by someone reading it - rather than re-guessing at every
+            # start and looking, in the file, like it was never set.
+            cfg.save()
+            log.info("Dopisano ui.language = %r do configu", cfg.get("ui.language"))
         return cfg
 
     # -- access ---------------------------------------------------------
@@ -185,6 +209,7 @@ class Config:
 
     def _validate(self) -> None:
         """Clamp or reset anything that would blow up later, loudly."""
+        self._resolve_ui_language()
         self._one_of("transcription.language", LANGUAGES)
         self._one_of("hotkey.mode", MODES)
         self._one_of("transcription.device", DEVICES)
@@ -202,6 +227,29 @@ class Config:
         if not isinstance(replacements, dict):
             log.warning("[replacements] nie jest tabela - ignoruje")
             self.set("replacements", {}, save=False)
+
+    def _resolve_ui_language(self) -> None:
+        """Interface language: whatever the user picked, else Windows' own.
+
+        Not handled by `_one_of`, because there is no fixed default to fall back
+        to - the default *is* the system's language, and it has to be resolved
+        rather than stored. First run therefore writes a real value into
+        config.toml instead of leaving a sentinel the next version has to
+        interpret. A garbled value gets the same treatment plus a warning.
+        """
+        current = self.get("ui.language")
+        if current in UI_LANGUAGES:
+            return
+        self._guessed_ui_language = True
+        detected = detect_system_language()
+        if current is None:
+            log.info("Jezyk interfejsu z systemu: %s", detected)
+        else:
+            log.warning(
+                "ui.language = %r nie jest jednym z %s - uzywam %r",
+                current, UI_LANGUAGES, detected,
+            )
+        self.set("ui.language", detected, save=False)
 
     def _one_of(self, dotted: str, allowed: tuple[str, ...]) -> None:
         value = self.get(dotted)

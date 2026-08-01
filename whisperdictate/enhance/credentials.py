@@ -13,11 +13,19 @@ from __future__ import annotations
 import logging
 import os
 
+from ..i18n import t
 from .registry import spec
 
 log = logging.getLogger(__name__)
 
 _TARGET_PREFIX = "WhisperDictateWin:"
+
+#: Where a key was found. Machine values, because callers branch on them - the
+#: dialog offers to delete a stored key only when there is one - and branching on
+#: a translated sentence breaks the moment the sentence is translated.
+SOURCE_ENV = "env"
+SOURCE_STORE = "store"
+SOURCE_NONE = "none"
 
 # The blob API is asymmetric, verified against pywin32 rather than assumed:
 #   CredWrite wants a str and encodes it as UTF-16-LE itself. Handing it bytes
@@ -43,13 +51,27 @@ def get_api_key(provider: str) -> str | None:
 
 
 def source(provider: str) -> str:
-    """Where the key would come from — for diagnostics, never the key itself."""
+    """Which store the key would come from — never the key itself.
+
+    One of SOURCE_ENV / SOURCE_STORE / SOURCE_NONE. Use describe_source() for
+    something to show a human.
+    """
     env_var = spec(provider).env_var
     if env_var and os.environ.get(env_var, "").strip():
-        return f"zmienna srodowiskowa {env_var}"
+        return SOURCE_ENV
     if _read_credential(target_for(provider)):
-        return "Menedzer polswiadczen Windows"
-    return "brak"
+        return SOURCE_STORE
+    return SOURCE_NONE
+
+
+def describe_source(provider: str) -> str:
+    """The same answer in the interface language, for --check and the key dialog."""
+    found = source(provider)
+    if found == SOURCE_ENV:
+        return t("credentials.env", env_var=spec(provider).env_var)
+    if found == SOURCE_STORE:
+        return t("credentials.store")
+    return t("credentials.none")
 
 
 def set_api_key(provider: str, key: str) -> None:

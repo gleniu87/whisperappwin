@@ -298,6 +298,24 @@ def add(known: str | None, term: str) -> str:
     return ", ".join(result)
 
 
+def remove(known: str | None, term: str) -> str:
+    """Drop a term. Matches the way `add` matches, so what got in can get out.
+
+    Folded comparison, and inflections of the target go too: a list that took
+    "Anthropica" in as an inflection of "Anthropic" must not keep a copy of it
+    after "Anthropic" is removed. Anything not there is simply not there - no
+    error, because the caller is a dialog acting on what it just displayed.
+    """
+    target = _fold(" ".join(str(term or "").split()))
+    if not target:
+        return ", ".join(terms(known))
+    kept = [
+        current for current in terms(known)
+        if _fold(current) != target and not _is_inflection_of(_fold(current), target)
+    ]
+    return ", ".join(kept)
+
+
 def prompt_section(raw: str | None) -> str:
     """Section appended to the clean-up system prompt, or "" when unset.
 

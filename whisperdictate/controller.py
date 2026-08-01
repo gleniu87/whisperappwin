@@ -12,10 +12,12 @@ import threading
 from enum import Enum
 from typing import Protocol
 
+from . import i18n
 from .audio import AudioError, Recorder
 from .config import Config
 from .enhance import EnhancementService
 from .history import History
+from .i18n import t
 from .postprocess import process
 from .sounds import Sounds
 from .transcriber import Transcriber, TranscriptionError
@@ -100,7 +102,7 @@ class DictationController:
         """Load the model in the background so the first dictation is not slow."""
 
         def work() -> None:
-            self._set_state(State.LOADING, "laduje model")
+            self._set_state(State.LOADING, t("detail.loading_model"))
             try:
                 self.transcriber.ensure_loaded()
             except TranscriptionError as exc:
@@ -147,7 +149,7 @@ class DictationController:
         duration = audio.size / 16_000 if audio is not None else 0.0
         if audio is None or duration < min_seconds:
             log.info("Nagranie %.2f s ponizej progu %.2f s - pomijam", duration, min_seconds)
-            self._set_state(State.IDLE, "za krotkie")
+            self._set_state(State.IDLE, t("detail.too_short"))
             return
 
         self._set_state(State.TRANSCRIBING)
@@ -159,7 +161,7 @@ class DictationController:
                 return
             self.recorder.cancel()
         self.sounds.play("cancel")
-        self._set_state(State.IDLE, "anulowano")
+        self._set_state(State.IDLE, t("detail.cancelled"))
 
     # -- pause ----------------------------------------------------------
 
@@ -173,8 +175,21 @@ class DictationController:
     # -- settings changes -------------------------------------------------
 
     def set_language(self, language: str) -> None:
+        """The language Whisper transcribes. Not the language of the interface."""
         self.config.set("transcription.language", language)
-        log.info("Jezyk: %s", language)
+        log.info("Jezyk dyktowania: %s", language)
+        self._set_state(self._state)
+
+    def set_ui_language(self, code: str) -> None:
+        """Switch the interface language, live.
+
+        The overlay picks the new words up on its next redraw (40 ms) because it
+        looks them up as it draws. The tray menu does not - its fixed labels were
+        translated when it was built - so the caller there rebuilds it.
+        """
+        active = i18n.use(code)
+        self.config.set("ui.language", active)
+        log.info("Jezyk interfejsu: %s", active)
         self._set_state(self._state)
 
     def set_audio_device(self, spec: int | str | None) -> None:
@@ -192,7 +207,7 @@ class DictationController:
         """Change the push-to-talk key, live."""
         listener = getattr(self, "hotkey", None)
         if listener is not None and not listener.set_key(key):
-            self._notify(f"Nieznany klawisz: {key}", error=True)
+            self._notify(t("notify.unknown_key", key=key), error=True)
             return
         self.config.set("hotkey.key", key)
         log.info("Hotkey: %s", key)
@@ -221,7 +236,7 @@ class DictationController:
         if enabled:
             problem = self.enhancement.check()
             if problem:
-                self._notify(f"Czyszczenie wlaczone, ale {problem}.", error=True)
+                self._notify(t("notify.enhancement_problem", problem=problem), error=True)
         self._set_state(self._state)
 
     def set_enhancement_provider(self, provider: str) -> None:
@@ -238,7 +253,9 @@ class DictationController:
         log.info("Provider czyszczenia: %s / %s", provider, self.config.get("enhancement.model"))
         problem = self.enhancement.check()
         if problem and self.enhancement.enabled:
-            self._notify(f"Provider {provider}: {problem}.", error=True)
+            self._notify(
+                t("notify.provider_problem", provider=provider, problem=problem), error=True
+            )
         self._set_state(self._state)
 
     def set_enhancement_model(self, model: str) -> None:
@@ -257,7 +274,7 @@ class DictationController:
         self.config.set("transcription.model", model)
 
         def work() -> None:
-            self._set_state(State.LOADING, f"laduje {model}")
+            self._set_state(State.LOADING, t("detail.loading_named_model", model=model))
             try:
                 self.transcriber.reload(model=model)
             except TranscriptionError as exc:
@@ -266,7 +283,7 @@ class DictationController:
                 self._notify(str(exc), error=True)
                 return
             self._set_state(State.IDLE, self.transcriber.description)
-            self._notify(f"Model: {self.transcriber.description}")
+            self._notify(t("notify.model_ready", description=self.transcriber.description))
 
         self._spawn(work, name="reload-model")
 
@@ -287,7 +304,7 @@ class DictationController:
         if not raw_text:
             log.info("Pusta transkrypcja - nic do wklejenia")
             self.sounds.play("cancel")
-            self._set_state(State.IDLE, "cisza")
+            self._set_state(State.IDLE, t("detail.silence"))
             return
 
         text, enhancement = raw_text, None
@@ -302,7 +319,7 @@ class DictationController:
             # The prompt's EMPTY sentinel: the model judged this pure filler.
             log.info("Warstwa czyszczaca uznala transkrypcje za pusta - nie wklejam")
             self.sounds.play("cancel")
-            self._set_state(State.IDLE, "odrzucone jako szum")
+            self._set_state(State.IDLE, t("detail.noise_rejected"))
             return
 
         # Deliberately ordered: history first. If the paste fails, the transcript
@@ -330,18 +347,19 @@ class DictationController:
                 auto_paste=bool(self.config.get("output.auto_paste", True)),
                 restore_clipboard=bool(self.config.get("output.restore_clipboard", True)),
                 paste_delay_ms=int(self.config.get("output.paste_delay_ms", 120)),
+                clipboard_history=bool(self.config.get("output.clipboard_history", False)),
             )
         except ClipboardError as exc:
             log.error("%s", exc)
             self.sounds.play("error")
             self._set_state(State.ERROR, str(exc))
-            self._notify(f"{exc} Tekst jest w historii.", error=True)
+            self._notify(t("notify.paste_failed", error=exc), error=True)
             return
 
         self.sounds.play("success")
-        detail = f"{len(text)} znakow, {result.speedup:.0f}x realtime"
+        detail = t("detail.delivered", chars=len(text), speedup=result.speedup)
         if enhancement is not None:
-            detail += f", oczyszczone +{enhancement.elapsed_seconds:.1f} s"
+            detail += t("detail.enhanced_suffix", seconds=enhancement.elapsed_seconds)
         self._set_state(State.IDLE, detail)
 
         # Last, and never in the way: the paste has already happened, so a
@@ -359,20 +377,74 @@ class DictationController:
         """Names the clean-up model repaired that are neither known nor refused."""
         return list(self._pending_vocabulary)
 
+    # -- rescue -----------------------------------------------------------
+
+    def copy_last_transcription(self) -> None:
+        """Put the last transcript back on the clipboard.
+
+        The rescue for a paste that went nowhere. Ctrl+V into a window with no
+        text field does nothing, `restore_clipboard` then takes the transcript off
+        the clipboard again, and the overlay has already reported success - so the
+        dictation exists only in the history. This hands it back.
+
+        A guard *before* the paste was the other option and was rejected: telling
+        whether a text field has focus is unreliable in exactly the applications
+        that matter (Electron gives the whole window one HWND and usually no
+        caret), and a warning that cries wolf stops being read.
+
+        Deliberately NOT excluded from the clipboard history: this is the user
+        copying something on purpose, unlike a dictation on its way to Ctrl+V.
+        """
+        from .output import ClipboardError, set_clipboard_text
+
+        text = self._last_transcription()
+        if not text:
+            self._notify(t("notify.nothing_to_copy"), error=True)
+            return
+        try:
+            set_clipboard_text(text, allow_history=True)
+        except ClipboardError as exc:
+            log.warning("%s", exc)
+            self._notify(str(exc), error=True)
+            return
+        log.info("Skopiowano ostatnia transkrypcje (%d znakow)", len(text))
+        self._notify(t("notify.copied_last", chars=len(text)))
+
+    def _last_transcription(self) -> str:
+        """The newest recorded transcript, or "" when there is nothing to offer.
+
+        Refuses when history is switched off rather than reading the file anyway:
+        `History.append` no-ops while disabled, so the newest line would be from
+        whenever recording was last on - handing that over as "the last
+        transcription" is a wrong answer, and worse than admitting there is none.
+        """
+        if not self.history.enabled:
+            return ""
+        try:
+            entries = self.history.recent(1)
+            return str(entries[-1].get("text", "")) if entries else ""
+        except Exception:  # noqa: BLE001 - a torn history must not break the rescue
+            log.debug("Nie moge odczytac ostatniej transkrypcji", exc_info=True)
+            return ""
+
     def refresh_vocabulary_suggestions(self) -> None:
         from . import vocabulary
 
+        # The scan is inside the guard, not just the read. `history.recent()` hands
+        # back whatever json.loads produced per line, and a corrupted file can
+        # legitimately parse to a number or a list - on which `pending()` raises
+        # AttributeError. That fires from _offer_vocabulary at the very end of a
+        # successful dictation, so the paste would land and the overlay would then
+        # report an internal error over the top of it.
         try:
-            entries = self.history.recent(self._SUGGESTION_WINDOW)
+            self._pending_vocabulary = vocabulary.pending(
+                self.history.recent(self._SUGGESTION_WINDOW),
+                # Combined: a name already in the shared file must not be offered.
+                vocabulary.combined(self.config.get("transcription.vocabulary", "")),
+                self.config.get("transcription.vocabulary_rejected", ""),
+            )
         except Exception:  # noqa: BLE001 - a suggestion is never worth an exception
-            log.debug("Nie moge odczytac historii dla propozycji slownika")
-            return
-        self._pending_vocabulary = vocabulary.pending(
-            entries,
-            # Combined: a name already in the shared file must not be offered.
-            vocabulary.combined(self.config.get("transcription.vocabulary", "")),
-            self.config.get("transcription.vocabulary_rejected", ""),
-        )
+            log.debug("Nie moge zebrac propozycji slownika z historii", exc_info=True)
 
     def _offer_vocabulary(self, raw_text: str, cleaned: str) -> None:
         """Notify only when this dictation produced something new."""
@@ -389,14 +461,29 @@ class DictationController:
         found = fresh[0]
         log.info("Kandydat do slownika: %r -> %r", found.heard, found.corrected)
         self._notify(
-            f"Nowa nazwa wlasna? {found.heard} -> {found.corrected}. "
-            "Menu tray > Czyszczenie tekstu > Propozycje slownika."
+            t("notify.new_proper_noun", heard=found.heard, corrected=found.corrected)
         )
 
     def accept_vocabulary(self, term: str) -> None:
+        """Add one name. Also the path the 'add a name' dialog takes, so a typed
+        name and an accepted suggestion collapse inflections the same way."""
         from . import vocabulary
 
         self.set_vocabulary(vocabulary.add(self.config.get("transcription.vocabulary", ""), term))
+        self.refresh_vocabulary_suggestions()
+
+    def remove_vocabulary(self, term: str) -> None:
+        """Drop one name from the private list.
+
+        Only the private list: the shared `vocabulary.txt` is version-controlled
+        and edited in the repository, so silently rewriting it from a tray dialog
+        would produce a git diff nobody asked for.
+        """
+        from . import vocabulary
+
+        self.set_vocabulary(
+            vocabulary.remove(self.config.get("transcription.vocabulary", ""), term)
+        )
         self.refresh_vocabulary_suggestions()
 
     def reject_vocabulary(self, term: str) -> None:
@@ -427,7 +514,7 @@ class DictationController:
                 target()
             except Exception:  # noqa: BLE001 - a crashing worker must not be silent
                 log.exception("Nieobsluzony blad w watku roboczym")
-                self._set_state(State.ERROR, "blad wewnetrzny")
+                self._set_state(State.ERROR, t("detail.internal_error"))
             finally:
                 self._workers.discard(threading.current_thread())
 

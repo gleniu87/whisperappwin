@@ -4,7 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from unittest import mock
+
+from whisperdictate import config as config_module
 from whisperdictate.config import Config
+from whisperdictate.i18n import UI_LANGUAGES
 
 
 class ConfigTest(unittest.TestCase):
@@ -50,6 +54,54 @@ class ConfigTest(unittest.TestCase):
     def test_malformed_toml_falls_back_to_defaults(self):
         self.path.write_text("this is not = = toml [[[", encoding="utf-8")
         self.assertEqual(Config.load(self.path).get("transcription.language"), "pl")
+
+    # -- interface language ---------------------------------------------
+
+    def test_first_run_takes_the_interface_language_from_the_system(self):
+        with mock.patch.object(config_module, "detect_system_language", return_value="pl"):
+            cfg = Config.load(self.path)
+        self.assertEqual(cfg.get("ui.language"), "pl")
+
+    def test_a_system_we_do_not_translate_into_lands_on_english(self):
+        """detect_system_language() already applies the rule; this pins that the
+        config asks it rather than inventing a default of its own."""
+        with mock.patch.object(config_module, "detect_system_language", return_value="en"):
+            self.assertEqual(Config.load(self.path).get("ui.language"), "en")
+
+    def test_the_detected_language_is_written_to_the_file_not_left_as_a_sentinel(self):
+        """So the value in config.toml is always one the user can read and edit,
+        and the next version has no sentinel to interpret."""
+        with mock.patch.object(config_module, "detect_system_language", return_value="pl"):
+            Config.load(self.path)
+        self.assertIn('language = "pl"', self.path.read_text(encoding="utf-8"))
+
+    def test_a_chosen_language_is_never_overridden_by_the_system(self):
+        self.path.write_text('[ui]\nlanguage = "en"\n', encoding="utf-8")
+        with mock.patch.object(config_module, "detect_system_language", return_value="pl"):
+            self.assertEqual(Config.load(self.path).get("ui.language"), "en")
+
+    def test_an_older_config_gains_the_setting_on_the_next_start(self):
+        """Written down once rather than re-guessed every start, so the file says
+        what the app is doing."""
+        self.path.write_text('[ui]\noverlay = true\n', encoding="utf-8")
+        with mock.patch.object(config_module, "detect_system_language", return_value="pl"):
+            Config.load(self.path)
+        self.assertIn('language = "pl"', self.path.read_text(encoding="utf-8"))
+
+    def test_a_config_that_already_has_the_setting_is_not_rewritten(self):
+        """Nothing to fix means nothing to write - a load must not churn the file."""
+        self.path.write_text('[ui]\nlanguage = "en"\n', encoding="utf-8")
+        before = self.path.read_text(encoding="utf-8")
+        Config.load(self.path)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_a_nonsense_language_is_replaced_by_the_detected_one(self):
+        self.path.write_text('[ui]\nlanguage = "klingon"\n', encoding="utf-8")
+        with mock.patch.object(config_module, "detect_system_language", return_value="pl"):
+            self.assertEqual(Config.load(self.path).get("ui.language"), "pl")
+
+    def test_the_real_detection_yields_a_language_we_have(self):
+        self.assertIn(Config.load(self.path).get("ui.language"), UI_LANGUAGES)
 
     def test_replacements_roundtrip(self):
         cfg = Config.load(self.path)

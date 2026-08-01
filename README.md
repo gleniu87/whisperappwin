@@ -81,8 +81,39 @@ Pierwsze uruchomienie pobiera model (~1.6 GB) z Hugging Face do
 **Przytrzymaj prawy Alt, mów, puść.** Tekst pojawi się w aktywnym oknie.
 
 Ikona w zasobniku pokazuje stan kolorem — szary (gotowy), czerwony (nagrywanie),
-niebieski (transkrypcja), żółty (ładowanie modelu). Z jej menu przełączysz język,
-model i **mikrofon**, wstrzymasz dyktowanie i otworzysz konfigurację, historię lub log.
+niebieski (transkrypcja), żółty (ładowanie modelu), ciemnoszary (wyłączone).
+Z jej menu przełączysz język dyktowania, język aplikacji, model i **mikrofon**
+oraz otworzysz konfigurację, historię lub log.
+
+Na górze menu jest **Włącz dyktowanie** — główny wyłącznik. Odhaczony: hotkey
+przestaje działać, trwające nagranie leci do kosza, ale model zostaje w pamięci
+i ikona zostaje w zasobniku. Na czas spotkania to jedno kliknięcie, nie restart.
+
+Menu nie ma linii statusu. Miała ją i była wygodna, dopóki nie włączyło się kilku
+rzeczy — Windows rozciąga menu do najdłuższej pozycji, więc jedno zdanie ze stanem,
+modelem i providerem robiło z całego menu pas przez pół ekranu. Stan jest w kolorze
+ikony i w tooltipie (najedź), a wybory są w podpisach podmenu: *Model: large-v3-turbo*,
+*Hotkey: Prawy Ctrl*, *Provider: DeepSeek API*.
+
+### Język interfejsu
+
+Menu tray, dymek nagrywania i okna dialogowe mówią **po polsku albo po angielsku**;
+przełącznik jest w menu tray → *Język aplikacji*. Zmiana działa od razu, bez
+restartu, i zapisuje się w `ui.language`.
+
+**Pierwsze uruchomienie bierze język z Windows** — z języka *wyświetlania* systemu,
+nie z regionu, bo to on odpowiada na pytanie „w jakim języku ten człowiek czyta
+oprogramowanie". Jeśli to ani polski, ani angielski, aplikacja wybiera angielski.
+Wynik zapisuje się jako konkretne `"pl"` albo `"en"`, więc widać, co wybrała.
+
+To **osobne ustawienie od języka dyktowania** (`transcription.language`) i tak ma
+być: dyktowanie po angielsku z polskim menu jest normalną kombinacją. Dlatego oba
+przełączniki stoją w menu obok siebie — *Język dyktowania* i *Język aplikacji*
+wyjaśniają się nawzajem, a każdy z osobna czytałby się jako „to ustawienie języka".
+
+Log i wyjście z linii poleceń (`-Check`, `-Benchmark`, `-Quality`) zostają po
+polsku niezależnie od tego ustawienia. Czyta je ten, kto diagnozuje, a nie ten,
+kto dyktuje.
 
 ### Wybór mikrofonu
 
@@ -98,9 +129,53 @@ urządzenie.
 Odłączenie wybranego mikrofonu (np. kamerki USB) nie psuje aplikacji: przy
 następnym dyktowaniu przeskanuje sprzęt ponownie, a jeśli urządzenia nadal nie ma
 — nagra z domyślnego systemowego i powie Ci o tym powiadomieniem. Urządzenie
-zostaje zaznaczone w menu jako *(niepodlaczony)*, żeby było widać, na co aplikacja
-czeka. **Odswiez liste** wymusza ponowne wykrycie sprzętu (PortAudio buforuje listę
+zostaje zaznaczone w menu jako *(niepodłączony)*, żeby było widać, na co aplikacja
+czeka. **Odśwież listę** wymusza ponowne wykrycie sprzętu (PortAudio buforuje listę
 przy starcie, więc świeżo podłączony mikrofon inaczej się nie pojawi).
+
+### Schowek i dymek nagrywania
+
+Wklejanie idzie przez schowek i `Ctrl+V` — tak jak w oryginale (`NSPasteboard` +
+`⌘V`). Dwie rzeczy da się z tym zrobić:
+
+- **`output.restore_clipboard`** (domyślnie `true`) — po wklejeniu wraca to, co
+  miałeś w schowku wcześniej. Ustaw `false`, jeśli chcesz, żeby transkrypcja
+  została w schowku do ponownego wklejenia.
+- **`output.clipboard_history`** (domyślnie `false`) — czy dyktowanie ma trafiać
+  do **historii schowka Windows (Win+V)** i do schowka w chmurze.
+
+Drugie ustawienie istnieje, bo pierwsze nie wystarczało: przywrócenie poprzedniej
+zawartości **nie usuwa wpisu z historii**. Windows zapisuje każdą zmianę schowka
+w momencie, w którym się dzieje, więc Win+V zbierał każde dyktowanie mimo
+`restore_clipboard = true`. Domyślnie oznaczamy więc dane formatami
+`CanIncludeInClipboardHistory` i `CanUploadToCloudClipboard` — tak samo, jak robią
+to menedżery haseł. Przywracana zawartość jest oznaczana tak samo, żeby nie
+dorzucać do Win+V duplikatu Twojego własnego wpisu przy każdym dyktowaniu.
+
+Świadomie **nie** wpisujemy tekstu znak po znaku (`SendInput`) zamiast wklejać:
+nowa linia w tekście to wtedy Enter, czyli wysłana w połowie wiadomość w każdym
+komunikatorze, a 900 znaków wpisuje się wyraźnie dłużej niż wkleja.
+
+#### Gdy dyktowanie trafiło w nic
+
+`Ctrl+V` do okna bez pola tekstowego nic nie wkleja, a `restore_clipboard` zabiera
+potem transkrypcję ze schowka — dymek zdąży pokazać „N znaków", jakby się udało.
+Tekst nie ginie: jest w historii. Menu tray → **Skopiuj ostatnią transkrypcję**
+wkłada go z powrotem do schowka (tym razem **z** historią Win+V, bo to już
+świadome kopiowanie, nie automat).
+
+Pozycja jest ukryta, gdy `history.enabled = false` — bez zapisu nie ma czego
+podać. Ostrzeżenia *przed* wklejeniem świadomie nie ma: sprawdzenie „czy jest
+sfokusowane pole tekstowe" jest niepewne dokładnie w Electronie (Teams, VS Code,
+przeglądarka), gdzie całe okno to jeden HWND i zwykle nie ma karetki, więc taki
+guard sypałby fałszywymi alarmami w najczęściej używanych aplikacjach.
+
+**Dymek nagrywania pojawia się na monitorze aktywnego okna**, nie na głównym.
+Tk zna tylko jeden ekran (`winfo_screenwidth()` to monitor główny, a jego początek
+to zawsze 0,0), więc pozycję liczymy z Win32: `GetForegroundWindow` →
+`MonitorFromWindow` → `rcWork` tego monitora. `rcWork`, nie `rcMonitor`, żeby ominąć
+pasek zadań akurat na tym ekranie. Pozycja jest przeliczana przy każdym pokazaniu
+dymka, a nie w trakcie — okno nie goni kursora po ekranach w środku nagrania.
 
 ### Klawisz dyktowania a polskie znaki
 
@@ -151,16 +226,29 @@ Podział jest celowy: wspólną bazę techniczną warto wersjonować i mieć na 
 maszynie, a nazw z pracy nie chcesz wypchnąć na GitHuba jednym `git push`.
 `config.toml` jest w `.gitignore` od pierwszego commita.
 
-Prywatną część edytujesz z menu tray → *Czyszczenie tekstu* → **Nazwy wlasne...**,
-wspólną — zwykłym edytorem. Format obu jest ten sam: po przecinku albo po jednej
-w linii, `#` zaczyna komentarz, nazwy wieloczłonowe dozwolone.
+Prywatną część edytujesz z menu tray → *Czyszczenie tekstu* → **Nazwy własne...**:
+wpisujesz **jedną** nazwę, Enter, i ląduje na liście pod spodem. Pole się czyści,
+kursor w nim zostaje, więc kolejną dopisujesz od razu. Żeby coś usunąć — zaznacz na
+liście i *Usuń zaznaczoną*. Niczego nie trzeba rozdzielać przecinkami ręcznie.
+
+Okno pokazuje **tylko część prywatną**, bo tylko ta jest edytowalna z traya; pod
+listą jest licznik nazw ze wspólnego pliku. Jeśli w priming Whispera widzisz nazwę,
+której nie ma na liście w oknie — pochodzi z [`vocabulary.txt`](vocabulary.txt)
+i tam się ją zmienia, zwykłym edytorem (plik jest w repo, więc zmiana to commit).
+
+Format pliku wspólnego: po przecinku albo po jednej w linii, `#` zaczyna komentarz,
+nazwy wieloczłonowe dozwolone.
 
 ```
 DeepSeek, Claude Code, Anthropic, Kubernetes, Terraform
 ```
 
 Nazwy zapisuj w **formie podstawowej** (`Anthropic`, nie `Anthropica`) — odmianą
-zajmuje się model.
+zajmuje się model. Aplikacja tego pilnuje: dopisanie `Anthropica` do listy, na
+której jest już `Anthropic`, nie robi drugiego wpisu, a usunięcie `Anthropic`
+zabiera ze sobą odmienione warianty. Obie połowy słownika są scalane tą samą
+regułą, więc odmieniony wpis w części prywatnej przegrywa z formą podstawową
+z pliku wspólnego i nie trafia ani do Whispera, ani do promptu.
 
 Jedna lista trafia w **dwa** miejsca:
 
@@ -393,11 +481,13 @@ Najczęściej zmieniane:
 
 | Klucz | Domyślnie | Znaczenie |
 |---|---|---|
-| `transcription.language` | `"pl"` | `pl`, `en` albo `auto` |
+| `transcription.language` | `"pl"` | dyktowanie: `pl`, `en` albo `auto` |
+| `ui.language` | z systemu | interfejs: `pl` albo `en` (fallback: `en`) |
 | `transcription.model` | `"large-v3-turbo"` | mniejszy = szybszy, mniej dokładny |
 | `hotkey.key` | `"alt_r"` | `alt_l`, `ctrl_r`, `f1`–`f20`, `scroll_lock`, `pause` |
 | `hotkey.mode` | `"hold"` | `hold` albo `toggle` |
 | `audio.device` | `null` | nazwa mikrofonu; ustawiana z menu tray |
+| `output.clipboard_history` | `false` | `true` = dyktowania trafiają też do Win+V |
 | `output.auto_paste` | `true` | `false` = tylko schowek, bez Ctrl+V |
 | `[replacements]` | pusta | słownik zamian, np. `"kubernetes" = "Kubernetes"` |
 
@@ -419,6 +509,28 @@ nie przetrwają. Notatki trzymaj w `config.example.toml`.
 
 Log: `%APPDATA%\WhisperDictateWin\whisperdictate.log`.
 Historia transkrypcji: `%APPDATA%\WhisperDictateWin\history.jsonl`.
+
+#### Historia nie rośnie w nieskończoność
+
+Plik jest **przycinany** do `history.max_entries` (domyślnie 5000), sprawdzane co
+100 dopisów. Zmierzone na realnych danych: mediana wpisu 667 B, średnia 871 B,
+najdłuższy widziany 3165 B (z `raw_text`, czyli przy włączonym czyszczeniu).
+
+| `max_entries` | sufit rozmiaru |
+|---|---|
+| 5000 (domyślnie) | **~4,2 MB** |
+| 2000 | ~1,7 MB |
+| 1000 | ~0,83 MB |
+
+Parsowanie pełnych 5000 wpisów to 23 ms, a dzieje się po wklejeniu, na wątku
+roboczym. Nie ma tu problemu do rozwiązania — dlatego nie ma kasowania „starszego
+niż N dni" ani osobnego okna ustawień.
+
+**Obniżając limit, pamiętaj o dwóch oknach:** po każdym dyktowaniu skanowane jest
+**300** ostatnich wpisów w poszukiwaniu nazw własnych, a `-SuggestVocabulary`
+czyta **1000**. Poniżej tych wartości propozycje słownika mają mniej danych.
+`history.enabled = false` wyłącza zapis całkowicie — ale wtedy *Skopiuj ostatnią
+transkrypcję* nie ma z czego czytać i znika z menu.
 
 ### Typowe problemy
 

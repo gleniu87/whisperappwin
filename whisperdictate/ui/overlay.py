@@ -13,6 +13,8 @@ import tkinter as tk
 from collections.abc import Callable
 
 from ..controller import State
+from ..i18n import t
+from .screens import place, position_in, work_area_for
 
 log = logging.getLogger(__name__)
 
@@ -26,22 +28,35 @@ TEXT = "#e6e8ec"
 MUTED = "#8b919c"
 METER_BG = "#242830"
 
-STATE_STYLE: dict[State, tuple[str, str]] = {
-    State.LOADING: ("#f0b429", "Laduje model..."),
-    State.RECORDING: ("#e5484d", "Nagrywanie"),
-    State.TRANSCRIBING: ("#3b82f6", "Transkrybuje..."),
-    State.ENHANCING: ("#8b5cf6", "Czyszcze tekst..."),
-    State.ERROR: ("#e5484d", "Blad"),
+STATE_COLOUR: dict[State, str] = {
+    State.LOADING: "#f0b429",
+    State.RECORDING: "#e5484d",
+    State.TRANSCRIBING: "#3b82f6",
+    State.ENHANCING: "#8b5cf6",
+    State.ERROR: "#e5484d",
 }
 
 # States that keep the overlay on screen. Everything else hides it.
-VISIBLE_STATES = frozenset(STATE_STYLE)
+VISIBLE_STATES = frozenset(STATE_COLOUR)
+
+# Work in progress gets the trailing dots; a state that is simply true does not.
+ONGOING_STATES = frozenset({State.LOADING, State.TRANSCRIBING, State.ENHANCING})
 
 POLL_MS = 40
 TOAST_MS = 2600
 # Whisper input is normalised speech; RMS rarely exceeds this, so scale to it
 # rather than to full scale or the meter never moves.
 METER_FULL_SCALE = 0.25
+
+
+def _label(state: State) -> str:
+    """The state's name in the interface language, looked up at draw time.
+
+    Not captured in a table at import: the words change when the user switches
+    language in the tray, and the overlay redraws 25 times a second anyway.
+    """
+    text = t(f"state.{state.value}")
+    return f"{text}..." if state in ONGOING_STATES else text
 
 
 class Overlay:
@@ -112,11 +127,15 @@ class Overlay:
 
     @staticmethod
     def _position(window: tk.Toplevel) -> None:
-        screen_w = window.winfo_screenwidth()
-        screen_h = window.winfo_screenheight()
-        x = (screen_w - WIDTH) // 2
-        y = screen_h - HEIGHT - BOTTOM_MARGIN
-        window.geometry(f"{WIDTH}x{HEIGHT}+{x}+{y}")
+        """Put the overlay on the screen the user is working on.
+
+        Recomputed every time the overlay is shown, not once at construction: the
+        answer is "wherever the foreground window is now", and that changes
+        between dictations. Not recomputed while it is already visible - the
+        window would chase the mouse across screens mid-recording.
+        """
+        x, y = position_in(work_area_for(window), WIDTH, HEIGHT, BOTTOM_MARGIN)
+        place(window, x, y, WIDTH, HEIGHT)
 
     def _pump(self) -> None:
         try:
@@ -168,9 +187,9 @@ class Overlay:
             self._draw_text(canvas, self._toast, "", TEXT)
             return
 
-        colour, label = STATE_STYLE.get(self._state, (MUTED, self._state.value))
+        colour = STATE_COLOUR.get(self._state, MUTED)
         self._draw_dot(canvas, colour)
-        self._draw_text(canvas, label, self._detail, TEXT)
+        self._draw_text(canvas, _label(self._state), self._detail, TEXT)
 
         if self._state is State.RECORDING:
             self._draw_meter(canvas, colour)

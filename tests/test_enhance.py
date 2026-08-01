@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from whisperdictate import i18n
 from whisperdictate.config import Config
 from whisperdictate.enhance import prompts, service
 from whisperdictate.enhance.providers import ProviderError
@@ -267,8 +268,9 @@ class EnhancementServiceTest(unittest.TestCase):
         self.assertEqual(EnhancementService(self.config).provider_name, "anthropic")
 
     def test_describe_reports_off_when_disabled(self):
+        i18n.use("pl")
         self.config.set("enhancement.enabled", False)
-        self.assertEqual(EnhancementService(self.config).describe(), "wylaczone")
+        self.assertEqual(EnhancementService(self.config).describe(), "wyłączone")
 
     def test_settings_are_read_per_call_not_cached(self):
         """A tray change must apply to the next dictation without a restart."""

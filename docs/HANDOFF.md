@@ -1,4 +1,4 @@
-# Handoff — stan na 2026-08-01 (sesja 2)
+# Handoff — stan na 2026-08-01 (sesja 3)
 
 Notatka przekazania między sesjami. `README.md` opisuje, jak używać;
 `docs/ARCHITECTURE.md` — dlaczego kod wygląda tak, a nie inaczej. Ten plik mówi,
@@ -32,7 +32,7 @@ odtwarzaniem kolejnej funkcji.
 | Sprzęt | i7-12700H, 64 GB RAM, RTX 3070 Ti Laptop (8 GB VRAM) |
 | GPU | działa: `large-v3-turbo @ cuda/float16`, ~29× realtime |
 | Mikrofon | `audio.device = "Mikrofon (Anker PowerConf C200)"` |
-| Testy | **265, wszystkie przechodzą** — `.\.venv\Scripts\python.exe -m unittest discover -s tests -t .` |
+| Testy | **378, wszystkie przechodzą** — `.\.venv\Scripts\python.exe -m unittest discover -s tests -t .` |
 
 Uruchamianie: `.\run.ps1` (z konsolą) albo `.\run.ps1 -Hidden` (tylko tray).
 Diagnostyka: `.\run.ps1 -Check`.
@@ -41,18 +41,35 @@ Diagnostyka: `.\run.ps1 -Check`.
 
 ## NASTĘPNY KROK
 
-**Benchmark DeepSeeka jest zamknięty** — klucz był już zapisany, benchmark
-poszedł, wynik niżej. Przy okazji wyszły trzy usterki, wszystkie naprawione.
+**Interfejs jest dwujęzyczny i ma polskie znaki.** Cały tekst UI siedzi teraz
+w `whisperdictate/i18n.py`; menu tray, dymek nagrywania i dialogi mówią po polsku
+albo po angielsku, przełącznik jest w tray → *Język aplikacji*, a pierwsze
+uruchomienie bierze język z Windows (fallback: angielski). Szczegóły niżej.
 
 Otwarte, w kolejności wartości:
 
-1. **Anthropic API wciąż nieprzetestowane** — nadal brak klucza. Jedyny provider
+0. **Kliknąć nowe menu na żywo.** Zweryfikowane są: renderowanie dymka i okna
+   nazw własnych (zrzuty ekranu — polskie znaki wychodzą poprawnie), pełne drzewo
+   menu w obu językach (wypisane programowo) i 378 testów. **Nie** klikałem
+   prawdziwego menu tray, nie przełączałem języka ani nie ruszałem głównego
+   wyłącznika w działającej aplikacji — to pierwsza rzecz do sprawdzenia.
+   Przy okazji: w `transcription.vocabulary` użytkownika nadal siedzi
+   `Anthropica` (stary wpis, nieszkodliwy — patrz niżej). Zostawiłem go, żeby
+   miał na czym sprawdzić nowe *Usuń zaznaczoną*; jego config to jego dane.
+
+1. **Zweryfikować ratunek na żywo.** *Skopiuj ostatnią transkrypcję* jest
+   zrobione i pokryte testami (w tym integracyjnym na prawdziwym schowku), ale
+   nie klikane w działającej aplikacji. Scenariusz: podyktuj cokolwiek do okna
+   bez pola tekstowego (np. pulpit), potem menu tray → *Skopiuj ostatnią
+   transkrypcję* → `Ctrl+V` w edytorze. Przy okazji `Win+V`: ta pozycja **ma**
+   tam być widoczna, samo dyktowanie **nie**.
+2. **Anthropic API wciąż nieprzetestowane** — nadal brak klucza. Jedyny provider
    bez ani jednego realnego wywołania. Gdy klucz się pojawi:
    `.\run.ps1 -SetApiKey anthropic`, potem ten sam benchmark.
-2. **Zdecydować, czy włączyć czyszczenie na stałe** i z jakim providerem.
+3. **Zdecydować, czy włączyć czyszczenie na stałe** i z jakim providerem.
    Dane do decyzji są już zebrane (tabela niżej) — brakuje tylko wyboru
    użytkownika. Nie zmieniaj domyślnego „wyłączone" za niego.
-3. **Tryb `-Hidden`** (pythonw) i **tryb `toggle`** — nadal nietknięte na żywo.
+4. **Tryb `-Hidden`** (pythonw) i **tryb `toggle`** — nadal nietknięte na żywo.
 
 `getpass` działa poprawnie w prawdziwym oknie PowerShell. **Nie** działa pod Git
 Bash (`!` w sesji Claude Code idzie przez bash) — tam potrafi wypisać klucz na
@@ -103,12 +120,27 @@ Tekst testowy (przerywniki, autopoprawka `handler znaczy parser`, identyfikator
 - **`--quality`** — porównanie jakościowe na 12 trudnych transkrypcjach,
   uruchomione na wszystkich czterech gotowych kombinacjach provider/model.
 - **Menu tray przebudowane** — Provider / Model / Styl jako osobne podmenu
-  podpisane bieżącym wyborem, plus podmenu *Hotkey* i pozycja *Nazwy wlasne...*.
+  podpisane bieżącym wyborem, plus podmenu *Hotkey* i pozycja *Nazwy własne...*.
   Wybór modelu DeepSeeka (flash/pro) istniał wcześniej, ale ginął w płaskiej
   liście dziewięciu pozycji — użytkownik go nie znalazł. To była wada UI,
   nie brak funkcji.
+- **Polskie znaki w dymku nagrywania — zweryfikowane na pikselach.** Zrzuty
+  ekranu prawdziwego okna Tk pokazują „Ładuję model...", „Czyszczę tekst..."
+  i detal `zażółć gęślą jaźń`. Skrypt: utwórz `Overlay` na withdrawn roocie,
+  `set_state()`, kilka `root.update()`, potem `ImageGrab.grab()` po
+  `winfo_rootx/rooty`. Testy tego nie łapią — to ta sama luka, przez którą
+  w sesji 2 okno dialogowe zostało 1×1 w rogu ekranu.
+- **Detekcja języka na tej maszynie**: `GetUserDefaultUILanguage()` → `0x415`
+  (pl-PL) → `pl`. Zgadza się z oczekiwaniem.
 
 ## Czego NIE zweryfikowano na żywo (nowe w tej sesji)
+
+- **Prawdziwe menu tray po zmianach** — labelki sprawdzone programowo i testami,
+  ale nieklikane. Dotyczy zwłaszcza *Język aplikacji*: przełączenie przebudowuje
+  całe menu (`Tray._rebuild_menu`), a `update_menu()` na żywej ikonie to jedyna
+  ścieżka, której test nie odtwarza w pełni.
+- **Dymek powiadomienia (balloon) z polskimi znakami** — idzie przez
+  `Shell_NotifyIconW`, więc powinno być dobrze, ale nie widziałem tego na oczy.
 
 - **Priming Whispera słownikiem** — połowa promptowa jest zmierzona (niżej),
   ale wpływ na **rozpoznanie** nie. Wymaga nagrania. To pierwsza rzecz do
@@ -118,7 +150,12 @@ Tekst testowy (przerywniki, autopoprawka `handler znaczy parser`, identyfikator
   Wymaga realnego dyktowania, w którym model coś poprawi.
 - **Zmiana hotkeya w locie** (`HotkeyListener.set_key`) — pokryta testami
   jednostkowymi, nieklikana w prawdziwym trayu.
-- **Dialog *Nazwy wlasne...*** — wymaga dispatchera Tk, nietestowalny headless.
+- **Dialog *Nazwy własne...*** — od sesji 3 **przetestowany zrzutem ekranu**, nie
+  tylko zbudowany: skrypt tworzy okno na withdrawn roocie, wpisuje nazwę, wysyła
+  `<Return>`, zaznacza pozycję, klika *Usuń zaznaczoną* i łapie `ImageGrab.grab()`
+  po każdym kroku. Da się to zrobić przez `root.after()` przed `wait_window()` —
+  „nietestowalny headless" było za mocne. Logika (add/remove) ma normalne testy;
+  ta droga jest do oglądania layoutu.
 
 ## Czego NIE zweryfikowano
 
@@ -142,8 +179,8 @@ Każda z nich kosztowała diagnozę. Nie zmieniaj ich bez powodu.
 **Użytkownik świadomie rozdziela zastosowania:** DeepSeek tylko do prywatnych
 projektów, do treści służbowych czyszczenie wyłączone albo przez Claude Code CLI
 (idzie przez jego subskrypcję, żaden trzeci podmiot). Dlatego każdy provider
-deklaruje jurysdykcję (`registry.ProviderSpec.hosting`), widoczną w `--check`,
-w oknie klucza i w README. **Nie chowaj tego.**
+deklaruje jurysdykcję (`registry.hosting()`, od sesji 3 z katalogu tłumaczeń),
+widoczną w `--check`, w oknie klucza i w README. **Nie chowaj tego.**
 
 **`None` ≠ pusty string w `EnhancementService.enhance()`.** `None` = „wklej
 surowy transkrypt" (awaria). Pusty = sentinel `EMPTY` = „to był sam szum, nie
@@ -258,8 +295,221 @@ lambda dostanie obiekt `Icon` zamiast wartości. Pilnuje tego
 `InputStream(...)` przechodzi, a `.start()` odrzuca. To był realny błąd
 produkcyjny (`118fe29`).
 
+**Menu tray nie ma linii statusu i nie ma jej odzyskiwać.** Była to jedna
+nieaktywna pozycja ze stanem, modelem i providerem w jednym zdaniu. Windows
+rozciąga popup do najdłuższej pozycji, więc przy włączonym czyszczeniu robiła
+z menu pas przez pół ekranu — zgłoszone przez użytkownika. Wszystko, co mówiła,
+jest gdzie indziej: stan w kolorze ikony i w tooltipie, wybory w podpisach
+podmenu (`Model: {name}`, `Hotkey: {key}`, `Provider: {name}`). Pilnuje tego
+`test_the_menu_carries_no_status_line` i `test_no_top_level_entry_is_absurdly_wide`.
+
+**Główny wyłącznik jest odwrotnością `paused` i to jest celowe.** W menu jest
+„Włącz dyktowanie" zaznaczone, gdy działa; kontroler mówi `set_paused` /
+`State.PAUSED`. Nie ujednolicaj jednej strony do drugiej: stan maszyny nazywa się
+„wstrzymane", a menu proponuje włączenie czegoś — to dwie połowy tego samego
+faktu i każda jest czytelna po swojej stronie. Wyłącznik **nie** wyładowuje modelu
+ani nie zdejmuje hooka; o to prosił użytkownik („żeby nie trzeba było zamykać
+aplikacji"). Stara pozycja „Wstrzymaj dyktowanie" zniknęła — dwa przełączniki na
+jeden stan, w przeciwnych fazach, to była pułapka.
+
+**Słownik nazw własnych: dodawanie po jednej, nie jedna linia z przecinkami.**
+Poprzednie okno to był `askstring` wypełniony całą listą jako jeden string. Przy
+trzech nazwach działało, przy dziesięciu przestało: w polu na 400 znaków nic nie
+widać, usunięcie wpisu to edycja wokół przecinków, a Enter zapisuje to, co
+w linii akurat jest. Użytkownik zgłosił to sam („to tak spuchnie"). Teraz:
+wpisz nazwę → Enter → ląduje na liście, pole się czyści; zaznacz → *Usuń
+zaznaczoną*. Okno pokazuje **tylko część prywatną**, bo `vocabulary.txt` jest
+wersjonowany i dialog nie ma prawa robić commita za użytkownika — pod listą jest
+licznik nazw wspólnych i nazwa pliku, żeby było wiadomo, skąd biorą się pozostałe.
+
+**`vocabulary.remove()` musi dopasowywać tak samo jak `add()`.** `add()` scala
+`Anthropica` na `Anthropic`; gdyby `remove("Anthropic")` zostawiało odmienioną
+kopię, nazwa wróciłaby do primingu po tym, jak użytkownik ją usunął. Pilnuje tego
+`test_removing_the_stem_takes_its_inflections_too`.
+
+**Skąd wzięło się `Anthropic` w oknie i `Anthropica` w configu (sesja 3).**
+Realne zgłoszenie, warto znać oba źródła. `Anthropic` jest w `vocabulary.txt`
+(wspólny, zaseedowany przeze mnie w sesji 2) — idzie do primingu, ale **nie**
+pokazuje się w oknie, bo okno pokazuje tylko część prywatną. `Anthropica`
+siedziało w `transcription.vocabulary` w `%APPDATA%`: zapisane przez UI (log,
+`Slownik nazw wlasnych: 1 pozycji`), przy pustym `vocabulary_rejected`, czyli
+**nie** przez „Nigdy o to nie pytaj". Najprawdopodobniej Enter w dialogu
+propozycji — `<Return>` jest tam podpięty pod „Dopisz", a przycisk jest
+`default="active"`. Zostawiłem to tak: dialog otwiera się z menu świadomie
+i „dodaj" jest właściwą domyślną akcją, a od sesji 3 zły wpis da się usunąć
+jednym kliknięciem. Sam wpis był nieszkodliwy — `combined()` scalał go na
+`Anthropic` ze wspólnego pliku (zweryfikowane sondą), więc do Whispera nigdy
+nie trafił.
+
+**`refresh_vocabulary_suggestions()` łapie wyjątki z całego skanu, nie tylko
+z czytania pliku.** `history.recent()` zwraca to, co `json.loads` zrobił z każdej
+linii — uszkodzona historia może się sparsować do liczby albo listy, na czym
+`pending()` wywala `AttributeError`. To leci z `_offer_vocabulary` na samym końcu
+udanego dyktowania, więc tekst by się wkleił, a chwilę później overlay pokazałby
+„błąd wewnętrzny". Znalezione przy pisaniu testu, nie na żywo.
+
+**Dyktowania są wykluczone z historii schowka Windows i to nie jest to samo co
+`restore_clipboard`.** Użytkownik zgłosił, że schowek się zaśmieca, mimo że
+`restore_clipboard = true` od początku przywraca poprzednią zawartość. Przywrócenie
+**nie usuwa wpisu z Win+V** — Windows zapisuje każdą zmianę w momencie, w którym
+się dzieje. Dlatego `output.clipboard_history = false` (domyślnie) dokłada do
+schowka dwa zarejestrowane formaty, `CanIncludeInClipboardHistory` i
+`CanUploadToCloudClipboard`, oba jako DWORD 0 — ten sam mechanizm, z którego
+korzystają menedżery haseł. Muszą być ustawione **w tej samej sesji schowka** co
+tekst (między `EmptyClipboard` i `CloseClipboard`), inaczej nie dotyczą niczego.
+Przywracana zawartość jest oznaczana tak samo, bo inaczej każde dyktowanie
+dorzucałoby do Win+V duplikat wpisu użytkownika. Zweryfikowane na prawdziwym
+schowku (`tests/test_output.py`, integracyjne — mock przyjąłby DWORD zapisany
+odwrotnie i nikt by tego nie zauważył).
+
+**Nie zamieniaj wklejania na wpisywanie znak po znaku.** Rozważone i odrzucone
+razem z użytkownikiem, gdy pytał o wyłączenie schowka: przy `SendInput` każda nowa
+linia w transkrypcji staje się Enterem, czyli wysyła w połowie wiadomość w Slacku
+i Teams, 900 znaków wpisuje się wyraźnie dłużej niż wkleja, a autouzupełnianie
+aplikacji wchodzi w drogę. Wykluczenie z historii daje to, o co chodziło
+(czysty Win+V), bez żadnego z tych ryzyk.
+
+**Dymek nagrywania pozycjonuje Win32, nie Tk.** `winfo_screenwidth()` to monitor
+**główny**, a początek układu Tk to zawsze 0,0 — więc na dwóch monitorach dymek
+zawsze wychodził na głównym, niezależnie od tego, gdzie użytkownik pisał. Teraz
+`GetForegroundWindow` → `MonitorFromWindow(MONITOR_DEFAULTTONEAREST)` → `rcWork`.
+Zmierzone na tej maszynie: aktywne okno na monitorze `(-1920, 0, 0, 1040)`, czyli
+**na lewo od głównego** i z paskiem zadań; stary kod dawał `x=810` (monitor
+główny), nowy `x=-1110`. Tk przyjmuje ujemny offset zapisany jako `+-1920+100`
+i stawia okno dosłownie tam — sprawdzone przez `winfo_rootx()`, nie założone.
+Arytmetyka siedzi w `position_in()` osobno od wywołań Win32, żeby dała się
+testować; `rcWork` zamiast `rcMonitor`, żeby ominąć pasek zadań na tym konkretnym
+ekranie. Pozycja jest przeliczana przy każdym **pokazaniu** dymka, nie w trakcie —
+inaczej okno goniłoby aktywne okno po ekranach w środku nagrania.
+
+**Historia NIE rośnie w nieskończoność i nie dorabiaj do niej kasowania po
+czasie.** Użytkownik pytał, słusznie, czy `history.jsonl` urośnie do gigabajtów.
+Nie: `history.py` przycina plik do `history.max_entries` (domyślnie 5000) co 100
+dopisów, od pierwszej wersji. Zmierzone na jego realnych danych: mediana wpisu
+667 B, średnia 871 B, max 3165 B → **sufit ~4,2 MB** przy domyślnym limicie
+(2000 → ~1,7 MB, 1000 → ~0,83 MB), a parsowanie pełnych 5000 wpisów to 23 ms.
+Zanim dołożysz kasowanie po dacie albo okno ustawień, powtórz ten pomiar —
+przy tych liczbach to byłby kod bez powodu. **Nie schodź z limitem poniżej
+~1000:** po każdym dyktowaniu skanowane jest 300 ostatnich wpisów
+(`controller._SUGGESTION_WINDOW`), a `--suggest-vocabulary` czyta 1000, więc
+mniejszy limit tnie propozycje słownika, nie tylko rozmiar pliku.
+
+**„Skopiuj ostatnią transkrypcję" celowo NIE jest wykluczone z Win+V.** Odwrotnie
+niż samo dyktowanie (`clipboard_history = false`): to użytkownik kopiuje świadomie,
+więc wpis w historii schowka jest tym, czego chce. Pilnują tego dwa testy
+patrzące w przeciwne strony — `test_rescue.py::test_and_is_visible_to_the_clipboard_history`
+i `test_output.py::test_deliver_excludes_by_default`.
+
+**Ratunek zamiast guarda przed wklejeniem — decyzja, nie zaniechanie.**
+Użytkownik pytał o ostrzeżenie „nie masz sfokusowanego pola tekstowego, tekst
+zniknie". Nie da się tego wiarygodnie stwierdzić w Electronie (Teams, VS Code,
+przeglądarka): całe okno to jeden HWND, `hwndCaret` zwykle puste. Ostrzeżenie
+sypiące fałszywymi alarmami w najczęściej używanych aplikacjach przestaje być
+czytane, więc zamiast wróżby przed faktem jest odzysk po fakcie z `history.jsonl`.
+Jeśli kiedyś sięgniesz po UI Automation (`GetFocusedElement`, `IsTextPatternAvailable`),
+najpierw **zmierz** to na Teams i VS Code, nie na Notatniku.
+
+**`_last_transcription()` odmawia przy wyłączonej historii, zamiast czytać plik.**
+`History.append` nic nie robi, gdy `enabled = False`, więc najnowsza linia jest
+z czasów, gdy zapis był włączony. Podanie jej jako „ostatniej transkrypcji" to
+zła odpowiedź udająca dobrą.
+
+**Wygląd okien: `tk.Entry` i `tk.Listbox` NIE MAJĄ opcji `padx`/`pady`.**
+Sprawdzone: `'padx' in widget.keys()` → `False` dla obu. Dlatego pole to
+`tk.Frame` z `highlightthickness=1` (biały, z 1-pikselową ramką w wybranym
+kolorze), a bezramkowy widget siedzi w nim z paddingiem. Nie „upraszczaj" tego
+z powrotem do gołego `Entry` — użytkownik zgłosił dokładnie ten objaw: kursor
+i tekst przyklejone do krawędzi. Do tego `insertwidth=1` (Tk domyślnie ma 2,
+Windows rysuje 1) i `ttk` zamiast `tk` na przyciski i etykiety, żeby motyw
+`vista` dał natywny wygląd i systemowy font zamiast zaszytego „Segoe UI 10".
+Zmierzone po zmianie: **kursor 1 px, odstęp od krawędzi pola 7 px** (było 2 px
+i 0 px). **DPI nie było przyczyną** — `GetDpiForMonitor` po
+`SetProcessDpiAwareness(2)` w osobnym procesie zwraca 96 dla obu monitorów.
+
+**Wiersz statusu w oknie nazw własnych ma zawsze `text=" "`.** Wygląda na
+przeoczenie, nie jest nim: komunikat o duplikacie pojawia się w trakcie pisania,
+a puste `text=""` zwijałoby wiersz i przestawiało okno pod ręką użytkownika.
+
+**Geometria monitorów siedzi w `ui/screens.py`, nie w `overlay.py`.** Potrzebują
+jej dwie rzeczy (dymek nagrywania i okna dialogowe), a `dialogs` nie ma po co
+importować całego overlaya. `position_in()` dla dymka, `centre_in()` dla okien —
+oba czyste, obok nieczystego `focused_work_area()`.
+
 **Prompt zawiera polskie słownictwo przerywników.** Prompt po angielsku wycina
 „um" i zostawia „no więc yyy" nietknięte. To rdzeń, nie tłumaczenie.
+
+**Brak polskich znaków w tray NIE był problemem czcionek ani kodowania.** Tak to
+zgłosił użytkownik i tak to wyglądało, ale przyczyną były gołe stringi w źródłach:
+`"Laduje model"`, `"Nazwy wlasne..."`. pystray na Windows używa `InsertMenuItemW`,
+`Shell_NotifyIconW` i `MENUITEMINFO.dwTypeData` jako `LPCWSTR` — wszystko
+szerokoznakowe (sprawdzone w źródłach pakietu). Tk rysuje diakrytyki bez żadnej
+konfiguracji (sprawdzone zrzutem ekranu). **Jeśli kiedyś znowu zobaczysz „?"
+zamiast „ą", szukaj w stringu, nie w czcionce.**
+
+**`ui.language` i `transcription.language` to dwa osobne ustawienia.** Kuszące
+jest zlanie ich w jedno; nie rób tego. Dyktowanie po angielsku z polskim menu jest
+normalne, a `transcription.language` przyjmuje dodatkowo `auto`, które dla
+interfejsu nie ma znaczenia. Oba przełączniki stoją w menu **obok siebie celowo**
+— pojedyncza pozycja „Język" jest dokładnie tym, co wcześniej mieszało jedno
+z drugim.
+
+**Log i wyjście CLI zostają po polsku — to granica, nie przeoczenie.** Czyta je
+ten, kto diagnozuje. Gdyby weszły do katalogu tłumaczeń, spuchłby kilkukrotnie bez
+zysku dla użytkownika. Wyjątkiem są komunikaty wyjątków, które **trafiają do
+dymka** (`AudioError`, `TranscriptionError`, `ClipboardError`, `fallback_note`) —
+te są tłumaczone, bo widzi je użytkownik. `ProviderError` zostaje po polsku, bo
+idzie wyłącznie do logu.
+
+**`t()` ma `key` jako parametr pozycyjny (`def t(key, /, **fields)`).** To nie
+ozdoba: wpis `menu.hotkey` ma placeholder `{key}`, więc bez `/` wywołanie
+`t("menu.hotkey", key=...)` wywala się na „got multiple values for argument 'key'".
+Złapały to testy przy pierwszym uruchomieniu. Nie „upraszczaj" sygnatury.
+
+**Menu *Język aplikacji* pokazuje endonimy („Polski", „English") w obu
+katalogach.** Wygląda na niedokończone tłumaczenie, nie jest nim: ktoś, kto
+przełączył się na język, którego nie czyta, musi umieć wrócić.
+
+**`credentials.source()` zwraca `env` / `store` / `none`, nie zdanie.** Dialog
+klucza rozgałęzia się na tej wartości, a na przetłumaczonym zdaniu rozgałęzić się
+nie da. Do pokazania człowiekowi jest `describe_source()`.
+
+**`ProviderSpec` nie trzyma już `hosting` ani podpowiedzi w `label`.** Została
+naga nazwa produktu („DeepSeek API"), bo ta jest identyczna w każdym języku.
+Podpowiedź i jurysdykcję dają `registry.label_with_hint()` i `registry.hosting()`.
+Deklaracja jurysdykcji **nadal jest widoczna** w `--check`, w oknie klucza i
+w README — pilnuje tego `test_hosting_note_flags_the_jurisdiction_in_both_languages`,
+który sprawdza „Chiny" po polsku i „China" po angielsku.
+
+**Pierwsze uruchomienie pyta Windows o *język wyświetlania*, nie o region.**
+`GetUserDefaultUILanguage()`, nie `locale.getlocale()`. To odpowiedź na pytanie
+„w jakim języku ten człowiek czyta oprogramowanie"; region to ustawienie formatów
+i na angielskim Windows z polskim regionem dałby polski, choć człowiek świadomie
+ustawił jedno i drugie. Locale jest konsultowane **tylko** wtedy, gdy języka
+wyświetlania nie da się odczytać (nie-Windows, brak ctypes). Rozstrzyga to
+`test_the_display_language_outranks_the_locale`.
+
+**`i18n.py` nie importuje niczego z pakietu i tak ma zostać.** Czytają z niego
+`config`, `audio`, `transcriber`, `output` i `enhance/` — jeden import w drugą
+stronę robi cykl w miejscu, w którym najtrudniej go zauważyć.
+
+**Wykryty język jest zapisywany do configu, nie zgadywany przy każdym starcie.**
+Świeży config dostaje go od razu; config z poprzedniej wersji (bez `ui.language`)
+dostaje jednorazowy zapis przy najbliższym starcie. Dzięki temu w pliku widać, co
+aplikacja robi. `test_a_config_that_already_has_the_setting_is_not_rewritten`
+pilnuje, żeby to nie zamieniło się w zapis przy każdym wczytaniu.
+
+**Testy traya MUSZĄ przypinać `ui.language`.** Świeży config bierze język
+z Windows, więc na angielskiej maszynie każda asercja na polską labelkę padłaby.
+`setUp` ustawia `pl` i przywraca poprzedni język przez `addCleanup` — język jest
+stanem modułu, a jeden z testów świadomie go przełącza.
+
+**Nie twórz w testach obiektów `pystray.Icon`, których nikt nie trzyma.** pystray
+nazywa klasę okna Win32 `"<name><id(icon)>SystemTrayIcon"` i odrejestrowuje ją
+tylko dla ikony, która faktycznie *działała* — w testach nigdy. Zebrana ikona
+zwalnia adres, nowa może na nim wylądować, dostać tę samą nazwę klasy i wywalić
+się na `ERROR_CLASS_ALREADY_EXISTS` — w losowym teście, nie w tym, który to
+spowodował. Kosztowało jedną fałszywą diagnozę. Dlatego drugi tray w
+`test_configured_but_absent_device_...` wisi na `self._extra_tray`.
 
 ---
 

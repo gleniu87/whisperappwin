@@ -73,6 +73,7 @@ przez inną aplikację, transkrypcja jest już zapisana i da się ją odzyskać.
 | Plik | Odpowiedzialność |
 |---|---|
 | `config.py` | TOML z dostępem `get("sekcja.klucz")`, walidacja, atomowy zapis |
+| `i18n.py` | katalog tekstów UI (pl/en), wybór języka, detekcja z Windows |
 | `paths.py` | lokalizacje w `%APPDATA%` / `%LOCALAPPDATA%` |
 | `runtime_cuda.py` | rejestracja DLL-i z pakietów `nvidia-*-cu12` przed importem ctranslate2 |
 | `audio.py` | wykrywanie i wybór mikrofonu, przechwytywanie, resampling, miernik poziomu |
@@ -101,6 +102,32 @@ class UiSink(Protocol):
 Tray i overlay to dwie niezależne implementacje, rejestrowane przez `add_ui()`.
 Dołożenie okna z dashboardem (którego nie ma w tej wersji, a jest w oryginale)
 sprowadza się do trzeciej implementacji tego protokołu — bez zmian w logice.
+
+## Warstwa językowa
+
+`i18n.py` trzyma **cały tekst, który widzi użytkownik** — menu tray, dymek
+nagrywania, dialogi, plus te komunikaty błędów, które trafiają do dymka
+(`AudioError`, `TranscriptionError`, `ClipboardError`). Nie importuje niczego
+z pakietu, więc `config`, `audio` i `enhance/` mogą z niego czytać bez cyklu.
+
+**Log i CLI zostają po polsku i to jest granica postawiona świadomie.** Czyta je
+ten, kto diagnozuje, a nie ten, kto dyktuje; trzymanie ich poza katalogiem
+utrzymuje go w rozmiarze jednego ekranu prawdziwego tekstu UI.
+
+Aktywny język to stan modułu (`i18n.use()`), nie obiekt przekazywany w dół.
+Alternatywą byłoby przeciąganie translatora przez kontroler do traya, overlaya
+i każdego dialogu, a użytkownik na proces jest dokładnie jeden.
+
+Dwa języki to **dwa niezależne ustawienia**: `ui.language` (interfejs) i
+`transcription.language` (co słyszy Whisper). Dyktowanie po angielsku z polskim
+menu jest normalną kombinacją, a `transcription.language` przyjmuje dodatkowo
+`auto`, które dla menu nie ma sensu.
+
+Tekst nadający się do odczytu maszynowego został wypchnięty z danych do katalogu:
+`ProviderSpec` trzyma już tylko nazwę produktu („DeepSeek API"), a podpowiedź
+(„~10x tańszy") i jurysdykcję (`registry.hosting()`) bierze z `i18n`.
+Podobnie `credentials.source()` zwraca teraz `env` / `store` / `none`, a nie
+zdanie po polsku — na przetłumaczonym zdaniu nie da się rozgałęzić kodu.
 
 ## Decyzje, które wyglądają dziwnie i są celowe
 

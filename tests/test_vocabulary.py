@@ -311,6 +311,106 @@ class AddTest(unittest.TestCase):
         self.assertEqual(vocabulary.combined("Anthropica", "Anthropic"), "Anthropic")
 
 
+class RemoveTest(unittest.TestCase):
+    """Whatever `add` let in, `remove` has to be able to take out - the dialog
+    offers a Remove button next to a name it just displayed, and a button that
+    does nothing on some names is worse than no button."""
+
+    def test_removes_a_name(self):
+        self.assertEqual(vocabulary.remove("A, DeepSeek, B", "DeepSeek"), "A, B")
+
+    def test_removes_the_only_name(self):
+        self.assertEqual(vocabulary.remove("DeepSeek", "DeepSeek"), "")
+
+    def test_matching_ignores_case_and_diacritics(self):
+        self.assertEqual(vocabulary.remove("Zażółć, B", "zazolc"), "B")
+
+    def test_an_absent_name_changes_nothing(self):
+        """The caller is a dialog, not a transaction. Nothing to raise about."""
+        self.assertEqual(vocabulary.remove("A, B", "C"), "A, B")
+
+    def test_blank_term_changes_nothing(self):
+        self.assertEqual(vocabulary.remove("A, B", "  "), "A, B")
+
+    def test_removing_the_stem_takes_its_inflections_too(self):
+        """add() folds "Anthropica" onto "Anthropic", so removing the stem must
+        not leave a copy of the inflected form behind to be re-primed."""
+        self.assertEqual(vocabulary.remove("Anthropic, Anthropica, Docker", "Anthropic"), "Docker")
+
+    def test_a_longer_name_sharing_a_prefix_survives(self):
+        """The mirror of add(): "Claude Code" is a different name, not an ending."""
+        self.assertEqual(vocabulary.remove("Claude, Claude Code", "Claude"), "Claude Code")
+
+    def test_an_unrelated_name_sharing_a_prefix_survives(self):
+        self.assertEqual(vocabulary.remove("Post, PostgreSQL", "Post"), "PostgreSQL")
+
+    def test_removing_from_the_private_list_cannot_touch_the_shared_one(self):
+        """Only the config half is editable from the tray; vocabulary.txt is
+        version-controlled and a dialog must not produce a git diff."""
+        self.assertEqual(vocabulary.remove("Prywatna", "Anthropic"), "Prywatna")
+        self.assertIn("Anthropic", vocabulary.terms(vocabulary.read_shared()))
+
+
+class ControllerEditingTest(unittest.TestCase):
+    """Adding and removing through the controller, which is what the dialog does.
+
+    The link worth testing is the re-priming: an entry removed from the config but
+    still sitting in the loaded transcriber's initial_prompt would keep steering
+    Whisper towards a name the user just deleted, until the next restart.
+    """
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from whisperdictate.config import Config
+        from whisperdictate.controller import DictationController
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.config = Config.load(Path(self._tmp.name) / "config.toml")
+        self.transcriber = mock.Mock(model_name="large-v3-turbo")
+        self.controller = DictationController(
+            config=self.config,
+            recorder=mock.Mock(is_recording=False, level=0.0),
+            transcriber=self.transcriber,
+            # A real list, not a bare Mock: editing the vocabulary rescans history
+            # for suggestions, and a Mock that swallowed the scan would make these
+            # tests pass without exercising it.
+            history=mock.Mock(recent=lambda _count: []),
+            sounds=mock.Mock(),
+        )
+
+    def test_adding_one_name_at_a_time(self):
+        self.controller.accept_vocabulary("Iceberg")
+        self.controller.accept_vocabulary("ICE Insurance")
+        self.assertEqual(
+            vocabulary.terms(self.config.get("transcription.vocabulary")),
+            ("Iceberg", "ICE Insurance"),
+        )
+
+    def test_removing_a_name(self):
+        self.controller.accept_vocabulary("Iceberg")
+        self.controller.accept_vocabulary("ICE Insurance")
+        self.controller.remove_vocabulary("Iceberg")
+        self.assertEqual(
+            vocabulary.terms(self.config.get("transcription.vocabulary")), ("ICE Insurance",)
+        )
+
+    def test_removal_re_primes_the_loaded_model(self):
+        self.controller.accept_vocabulary("Iceberg")
+        self.assertIn("Iceberg", self.transcriber.initial_prompt)
+        self.controller.remove_vocabulary("Iceberg")
+        self.assertNotIn("Iceberg", self.transcriber.initial_prompt or "")
+
+    def test_removal_leaves_the_shared_names_primed(self):
+        """Only the private half is being edited; the shared file still applies."""
+        self.controller.accept_vocabulary("Iceberg")
+        self.controller.remove_vocabulary("Iceberg")
+        self.assertIn("DeepSeek", self.transcriber.initial_prompt)
+
+
 class PromptIntegrationTest(unittest.TestCase):
     def test_vocabulary_reaches_the_built_prompt(self):
         system = prompts.build("default", "pl", "DeepSeek")

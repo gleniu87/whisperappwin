@@ -69,15 +69,17 @@ TRIGGERS = _trigger_table()
 #: key you hit dozens of times per paragraph. Right Ctrl carries no such duty.
 DEFAULT_KEY = "ctrl_r"
 
-#: The subset offered in the tray, with the trade-off spelled out. The config
-#: still accepts anything in TRIGGERS, F1-F20 included.
-MENU_TRIGGERS: tuple[tuple[str, str], ...] = (
-    ("ctrl_r", "Prawy Ctrl (zalecany)"),
-    ("ctrl_l", "Lewy Ctrl"),
-    ("alt_r", "Prawy Alt / AltGr - koliduje z ą, ę, ó"),
-    ("alt_l", "Lewy Alt"),
-    ("scroll_lock", "Scroll Lock"),
-    ("pause", "Pause"),
+#: The subset offered in the tray, in menu order. Their labels - and the
+#: trade-off spelled out next to right Alt - are i18n keys "hotkey.<key>" and
+#: "hotkey.<key>.short". The config still accepts anything in TRIGGERS,
+#: F1-F20 included.
+MENU_KEYS: tuple[str, ...] = (
+    "ctrl_r",
+    "ctrl_l",
+    "alt_r",
+    "alt_l",
+    "scroll_lock",
+    "pause",
 )
 
 

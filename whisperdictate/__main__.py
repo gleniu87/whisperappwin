@@ -19,7 +19,7 @@ import threading
 import time
 import tkinter as tk
 
-from . import APP_NAME, __version__, paths, vocabulary
+from . import APP_NAME, __version__, i18n, paths, vocabulary
 from .audio import AudioError, Recorder, list_input_devices
 from .config import Config
 from .controller import DictationController
@@ -165,6 +165,7 @@ def cmd_check(config: Config) -> int:
     print(f"  Hotkey           {key} / {config.get('hotkey.mode')} - {known}")
 
     from .enhance import PROVIDERS as PROVIDER_SPECS
+    from .enhance import registry
 
     enhancement = EnhancementService(config)
     problem = enhancement.check()
@@ -173,7 +174,8 @@ def cmd_check(config: Config) -> int:
     for key, provider_spec in PROVIDER_SPECS.items():
         if provider_spec.env_var is None:
             continue
-        print(f"    klucz {key:<10} {credentials.source(key)}  ->  {provider_spec.hosting}")
+        print(f"    klucz {key:<10} {credentials.describe_source(key)}"
+              f"  ->  {registry.hosting(key)}")
 
     print("\nLaduje model (przy pierwszym uruchomieniu pobiera ~1.6 GB)...")
     transcriber = build_transcriber(config)
@@ -238,15 +240,15 @@ def cmd_set_api_key(provider: str) -> int:
     import getpass
 
     from .enhance import PROVIDERS as PROVIDER_SPECS
+    from .enhance import registry
 
     if provider not in PROVIDER_SPECS or PROVIDER_SPECS[provider].env_var is None:
         keyed = [k for k, s in PROVIDER_SPECS.items() if s.env_var]
         print(f"Nieznany provider {provider!r}. Dostepne: {', '.join(keyed)}")
         return 1
 
-    provider_spec = PROVIDER_SPECS[provider]
-    print(f"Provider:  {provider_spec.label}")
-    print(f"Ruch idzie do: {provider_spec.hosting}")
+    print(f"Provider:  {registry.label_with_hint(provider)}")
+    print(f"Ruch idzie do: {registry.hosting(provider)}")
     print("Klucz zostanie zapisany w Menedzerze polswiadczen Windows.")
     print("Nie trafi do pliku konfiguracyjnego ani do logow.\n")
 
@@ -326,6 +328,7 @@ def cmd_benchmark(config: Config, text: str) -> int:
     about from pricing pages — it has to be measured from where you sit.
     """
     from .enhance import PROVIDERS as PROVIDER_SPECS
+    from .enhance import registry
 
     language = _prepare_for_enhance(config, None)
     print(f"Tekst wejsciowy ({len(text)} znakow):\n  {text}\n")
@@ -342,7 +345,7 @@ def cmd_benchmark(config: Config, text: str) -> int:
                 print(f"--- {key} / {model}: POMINIETO ({problem})")
                 continue
 
-            print(f"--- {key} / {model}  [{provider_spec.hosting}]")
+            print(f"--- {key} / {model}  [{registry.hosting(key)}]")
             result = service.enhance(text, language)
             if result is None:
                 print("    NIEUDANE (szczegoly w logu)\n")
@@ -662,6 +665,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     setup_logging(args.verbose)
     config = Config.load(paths.config_path())
+    # Before anything can produce a user-facing string. Config.load has already
+    # resolved "which language" - including detecting it from Windows on a first
+    # run - so this only puts the answer into force.
+    i18n.use(config.get("ui.language"))
 
     if args.set_api_key:
         return cmd_set_api_key(args.set_api_key)

@@ -127,11 +127,8 @@ PROMPTS: dict[str, str] = {
     "verbatim": VERBATIM,
 }
 
-PROMPT_LABELS: dict[str, str] = {
-    "default": "Domyslny (pelne czyszczenie)",
-    "chat": "Czat / Slack",
-    "verbatim": "Doslowny (tylko interpunkcja)",
-}
+# Menu labels live in i18n under "style.<key>" and "style.<key>.short" - the
+# prompt bodies here are what the model reads, not what the user does.
 
 
 def language_directive(code: str | None) -> str:

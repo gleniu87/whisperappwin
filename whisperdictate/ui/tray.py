@@ -1,4 +1,4 @@
-"""System tray icon: status at a glance, language/model switching, quit.
+"""System tray icon: the master switch, the settings, quit.
 
 pystray owns a Win32 message loop, so the icon runs detached on its own thread
 while Tk keeps the main thread. Menu callbacks therefore arrive off-thread and
@@ -19,8 +19,9 @@ from ..audio import DeviceInfo, list_input_devices, refresh_devices
 from ..config import ENHANCEMENT_PROMPTS, ENHANCEMENT_PROVIDERS, LANGUAGES, MODEL_CHOICES, Config
 from ..controller import DictationController, State
 from ..enhance import PROVIDERS as PROVIDER_SPECS
-from ..enhance.prompts import PROMPT_LABELS
-from ..hotkey import DEFAULT_KEY, MENU_TRIGGERS
+from ..enhance.registry import label_with_hint
+from ..hotkey import DEFAULT_KEY, MENU_KEYS
+from ..i18n import UI_LANGUAGES, t
 
 log = logging.getLogger(__name__)
 
@@ -28,9 +29,9 @@ ICON_SIZE = 64
 
 # pystray menus are immutable once constructed - Menu stores its items as a tuple.
 # Only per-item text/checked/enabled callables are re-evaluated on display. So a
-# list that changes shape (microphones coming and going) requires rebuilding the
-# whole menu and calling update_menu().
-DEFAULT_DEVICE_LABEL = "Domyslne systemowe"
+# list that changes shape (microphones coming and going) - or a language switch,
+# which changes every fixed label at once - requires rebuilding the whole menu
+# and calling update_menu().
 MAX_DEVICE_NAME = 44
 
 STATE_COLOUR: dict[State, str] = {
@@ -43,17 +44,12 @@ STATE_COLOUR: dict[State, str] = {
     State.PAUSED: "#4b5060",
 }
 
-STATE_LABEL: dict[State, str] = {
-    State.IDLE: "Gotowy",
-    State.LOADING: "Laduje model",
-    State.RECORDING: "Nagrywanie",
-    State.TRANSCRIBING: "Transkrybuje",
-    State.ENHANCING: "Czyszcze tekst",
-    State.ERROR: "Blad",
-    State.PAUSED: "Wstrzymane",
-}
 
-LANGUAGE_LABEL = {"pl": "Polski", "en": "English", "auto": "Auto-detekcja"}
+# The overlay draws the same words from the same keys. Deliberately looked up
+# there rather than imported from here: nothing in the overlay should have to
+# pull in pystray and PIL to name a state.
+def _state_label(state: State) -> str:
+    return t(f"state.{state.value}")
 
 
 def _microphone_icon(colour: str) -> Image.Image:
@@ -120,19 +116,20 @@ class Tray:
 
     def notify(self, message: str, *, error: bool = False) -> None:
         try:
-            self._icon.notify(message, f"{APP_NAME} - blad" if error else APP_NAME)
+            title = t("tray.error_title", app=APP_NAME) if error else APP_NAME
+            self._icon.notify(message, title)
         except Exception:  # noqa: BLE001 - balloon tips can be disabled by policy
             log.debug("Powiadomienie tray niedostepne: %s", message)
 
     # -- menu -----------------------------------------------------------
 
     def _tooltip(self) -> str:
-        language = self.config.get("transcription.language", "pl")
-        device = self.config.get("audio.device") or DEFAULT_DEVICE_LABEL
+        language = str(self.config.get("transcription.language", "pl"))
+        device = self.config.get("audio.device") or t("device.default")
         parts = [
-            f"{APP_NAME} - {STATE_LABEL.get(self._state, self._state.value)}",
-            f"{LANGUAGE_LABEL.get(language, language)} | {self.controller.transcriber.model_name}",
-            f"Mikrofon: {_shorten(str(device), 40)}",
+            f"{APP_NAME} - {_state_label(self._state)}",
+            f"{t(f'language.{language}')} | {self.controller.transcriber.model_name}",
+            t("tray.tooltip.microphone", device=_shorten(str(device), 40)),
         ]
         if self._detail:
             parts.append(self._detail)
@@ -140,45 +137,94 @@ class Tray:
         return "\n".join(parts)[:127]
 
     def _build_menu(self) -> pystray.Menu:
+        """The menu, deliberately narrow.
+
+        There used to be a disabled status line at the top - state, model and
+        clean-up provider concatenated. It read well with everything off and
+        turned the menu absurdly wide once a few things were on, because Windows
+        sizes the popup to its longest entry. All of it is still available: the
+        state in the icon colour and the tooltip, the choices in the submenu
+        labels. None of it is worth the width.
+        """
         item = pystray.MenuItem
         return pystray.Menu(
-            item(lambda _: self._status_line(), None, enabled=False),
-            pystray.Menu.SEPARATOR,
-            item("Jezyk", pystray.Menu(*self._language_items())),
-            item("Model", pystray.Menu(*self._model_items())),
-            item("Mikrofon", pystray.Menu(*self._device_items())),
-            item(lambda _: f"Hotkey: {self._hotkey_label()}",
-                 pystray.Menu(*self._hotkey_items())),
-            item("Czyszczenie tekstu", pystray.Menu(*self._enhancement_items())),
-            pystray.Menu.SEPARATOR,
+            # Master switch, at the top where the status used to be. Dictation
+            # stops, the app stays: the hotkey is ignored and any recording in
+            # progress is dropped, but the model stays loaded and the tray stays
+            # here - so pausing for a meeting costs a click, not a restart.
             item(
-                "Wstrzymaj dyktowanie",
-                self._toggle_pause,
-                checked=lambda _: self.controller.paused,
+                t("menu.enabled"),
+                self._toggle_enabled,
+                # Inverted on purpose. The controller's vocabulary is "paused"
+                # (State.PAUSED, set_paused) and it should stay that way; a menu
+                # that offers to switch something *on* is the clearer half of the
+                # same fact. Do not "fix" one side to match the other.
+                checked=lambda _: not self.controller.paused,
             ),
             pystray.Menu.SEPARATOR,
-            item("Otworz konfiguracje", lambda: _open(paths.config_path())),
-            item("Otworz historie", lambda: _open(paths.history_path())),
-            item("Otworz log", lambda: _open(paths.log_path())),
+            # The two language pickers sit next to each other on purpose: side by
+            # side, "Język dyktowania" and "Język aplikacji" explain each other,
+            # whereas either one alone reads as "the language setting".
+            item(t("menu.dictation_language"), pystray.Menu(*self._language_items())),
+            item(t("menu.app_language"), pystray.Menu(*self._ui_language_items())),
+            # Named with the loaded model, which is what the status line was for.
+            # Short enough not to widen anything: the microphone entries below are
+            # longer, and the choice is otherwise invisible without opening it.
+            item(lambda _: t("menu.model", name=self.controller.transcriber.model_name),
+                 pystray.Menu(*self._model_items())),
+            item(t("menu.microphone"), pystray.Menu(*self._device_items())),
+            item(lambda _: t("menu.hotkey", key=self._hotkey_label()),
+                 pystray.Menu(*self._hotkey_items())),
+            item(t("menu.enhancement"), pystray.Menu(*self._enhancement_items())),
             pystray.Menu.SEPARATOR,
-            item("Zakoncz", self._quit),
+            # The rescue for a dictation that was pasted into nothing. Grouped with
+            # the other utilities, and hidden when history is off - with nothing
+            # being recorded it has nothing to hand back.
+            item(
+                t("menu.copy_last"),
+                self._copy_last_transcription,
+                visible=lambda _: bool(self.config.get("history.enabled", True)),
+            ),
+            item(t("menu.open_config"), lambda: _open(paths.config_path())),
+            item(t("menu.open_history"), lambda: _open(paths.history_path())),
+            item(t("menu.open_log"), lambda: _open(paths.log_path())),
+            pystray.Menu.SEPARATOR,
+            item(t("menu.quit"), self._quit),
         )
 
-    def _status_line(self) -> str:
-        label = STATE_LABEL.get(self._state, self._state.value)
-        cleanup = self.controller.enhancement.describe()
-        return f"{label} - {self.controller.transcriber.description} | czyszczenie: {cleanup}"
-
     def _language_items(self) -> list[pystray.MenuItem]:
+        """What Whisper transcribes. Unrelated to the language of this menu."""
         def make(code: str) -> pystray.MenuItem:
             return pystray.MenuItem(
-                LANGUAGE_LABEL.get(code, code),
+                t(f"language.{code}"),
                 lambda: self.controller.set_language(code),
                 checked=lambda _, c=code: self.config.get("transcription.language") == c,
                 radio=True,
             )
 
         return [make(code) for code in LANGUAGES]
+
+    def _ui_language_items(self) -> list[pystray.MenuItem]:
+        """The language of the tray, the overlay and the dialogs.
+
+        Every fixed label in this menu was translated when it was built, so the
+        switch rebuilds the whole thing rather than waiting for the next
+        microphone refresh.
+        """
+        def make(code: str) -> pystray.MenuItem:
+            # A closure, not `lambda c=code:` - see the arity note in _device_items.
+            def select() -> None:
+                self.controller.set_ui_language(code)
+                self._rebuild_menu()
+
+            return pystray.MenuItem(
+                t(f"ui_language.{code}"),
+                select,
+                checked=lambda _, c=code: self.config.get("ui.language") == c,
+                radio=True,
+            )
+
+        return [make(code) for code in UI_LANGUAGES]
 
     def _model_items(self) -> list[pystray.MenuItem]:
         def make(name: str) -> pystray.MenuItem:
@@ -192,17 +238,16 @@ class Tray:
         return [make(name) for name in MODEL_CHOICES]
 
     def _hotkey_items(self) -> list[pystray.MenuItem]:
-        """Push-to-talk key. See MENU_TRIGGERS for why right Ctrl leads."""
+        """Push-to-talk key. See MENU_KEYS for why right Ctrl leads."""
         return [
-            self._radio("hotkey.key", key, label, self.controller.set_hotkey_key)
-            for key, label in MENU_TRIGGERS
+            self._radio("hotkey.key", key, t(f"hotkey.{key}"), self.controller.set_hotkey_key)
+            for key in MENU_KEYS
         ]
 
     def _hotkey_label(self) -> str:
         key = str(self.config.get("hotkey.key", DEFAULT_KEY))
-        for name, label in MENU_TRIGGERS:
-            if name == key:
-                return label.split(" (")[0].split(" - ")[0]
+        if key in MENU_KEYS:
+            return t(f"hotkey.{key}.short")
         return key  # an F-key set by hand in the config
 
     def _device_items(self) -> list[pystray.MenuItem]:
@@ -229,17 +274,20 @@ class Tray:
                 radio=True,
             )
 
-        items = [make(None, DEFAULT_DEVICE_LABEL)]
+        items = [make(None, t("device.default"))]
         items += [make(d.name, _shorten(d.name, MAX_DEVICE_NAME)) for d in self._devices]
 
         # A device saved earlier but absent now (unplugged webcam) would otherwise
         # vanish from the menu with no radio button checked - confusing, because
         # it is still the configured device and still what the app will look for.
         if isinstance(selected, str) and not any(d.name == selected for d in self._devices):
-            items.append(make(selected, f"{_shorten(selected, MAX_DEVICE_NAME)} (niepodlaczony)"))
+            items.append(make(
+                selected,
+                t("device.disconnected", name=_shorten(selected, MAX_DEVICE_NAME)),
+            ))
 
         items.append(pystray.Menu.SEPARATOR)
-        items.append(pystray.MenuItem("Odswiez liste", self._refresh_devices))
+        items.append(pystray.MenuItem(t("menu.refresh_devices"), self._refresh_devices))
         return items
 
     def _enhancement_items(self) -> list[pystray.MenuItem]:
@@ -256,21 +304,21 @@ class Tray:
         item = pystray.MenuItem
         items = [
             item(
-                "Wlacz czyszczenie",
+                t("menu.enhancement.enable"),
                 self._toggle_enhancement,
                 checked=lambda _: bool(self.config.get("enhancement.enabled")),
             ),
             pystray.Menu.SEPARATOR,
             item(
-                lambda _: f"Provider: {self._current_provider_label()}",
+                lambda _: t("menu.enhancement.provider", name=self._current_provider_label()),
                 pystray.Menu(*self._provider_items()),
             ),
             item(
-                lambda _: f"Model: {self.config.get('enhancement.model')}",
+                lambda _: t("menu.enhancement.model", name=self.config.get("enhancement.model")),
                 pystray.Menu(*self._enhancement_model_items()),
             ),
             item(
-                lambda _: f"Styl: {self._current_style_label()}",
+                lambda _: t("menu.enhancement.style", name=self._current_style_label()),
                 pystray.Menu(*self._style_items()),
             ),
         ]
@@ -279,7 +327,7 @@ class Tray:
             items.append(pystray.Menu.SEPARATOR)
             items.append(
                 item(
-                    "Proponuj nazwy wlasne",
+                    t("menu.vocabulary.suggest"),
                     self._toggle_suggestions,
                     checked=lambda _: bool(
                         self.config.get("transcription.suggest_vocabulary", True)
@@ -290,12 +338,15 @@ class Tray:
             # eye to skip the entry, which is the one place the count matters.
             items.append(
                 item(
-                    lambda _: f"Propozycje slownika ({len(self.controller.pending_vocabulary)})...",
+                    lambda _: t(
+                        "menu.vocabulary.pending",
+                        count=len(self.controller.pending_vocabulary),
+                    ),
                     self._open_suggestions,
                     visible=lambda _: bool(self.controller.pending_vocabulary),
                 )
             )
-            items.append(item("Nazwy wlasne...", self._open_vocabulary))
+            items.append(item(t("menu.vocabulary.edit"), self._open_vocabulary))
             for provider_key in ENHANCEMENT_PROVIDERS:
                 if PROVIDER_SPECS[provider_key].env_var is None:
                     continue  # the CLI needs no key
@@ -336,7 +387,7 @@ class Tray:
 
     def _provider_items(self) -> list[pystray.MenuItem]:
         return [
-            self._radio("enhancement.provider", key, PROVIDER_SPECS[key].label,
+            self._radio("enhancement.provider", key, label_with_hint(key),
                         self.controller.set_enhancement_provider)
             for key in ENHANCEMENT_PROVIDERS
         ]
@@ -370,19 +421,22 @@ class Tray:
 
     def _style_items(self) -> list[pystray.MenuItem]:
         return [
-            self._radio("enhancement.prompt", key, PROMPT_LABELS[key],
+            self._radio("enhancement.prompt", key, t(f"style.{key}"),
                         self.controller.set_enhancement_prompt)
             for key in ENHANCEMENT_PROMPTS
         ]
 
     def _current_provider_label(self) -> str:
+        """Bare product name: the group label is already narrow, and the hint
+        that goes with the name inside the submenu is not a choice, it is a
+        reason to make one."""
         key = str(self.config.get("enhancement.provider", ""))
         spec = PROVIDER_SPECS.get(key)
-        return spec.label.split(" (")[0] if spec else key
+        return spec.label if spec else key
 
     def _current_style_label(self) -> str:
         key = str(self.config.get("enhancement.prompt", ""))
-        return PROMPT_LABELS.get(key, key).split(" (")[0]
+        return t(f"style.{key}.short") if key in ENHANCEMENT_PROMPTS else key
 
     def _api_key_entry(self, provider_key: str) -> pystray.MenuItem:
         def open_dialog() -> None:
@@ -392,7 +446,7 @@ class Tray:
                 lambda: dialogs.manage_api_key(self._dispatcher.root, provider_key)
             )
 
-        return pystray.MenuItem(f"Klucz API: {provider_key}...", open_dialog)
+        return pystray.MenuItem(t("menu.api_key", provider=provider_key), open_dialog)
 
     # -- actions --------------------------------------------------------
 
@@ -404,18 +458,36 @@ class Tray:
     def _refresh_devices(self) -> None:
         """Re-enumerate microphones and rebuild the menu around the new list."""
         if self.controller.state is State.RECORDING:
-            self.notify("Nie moge odswiezyc listy w trakcie nagrywania.", error=True)
+            self.notify(t("tray.no_refresh_while_recording"), error=True)
             return
 
         refresh_devices()
         self._devices = list_input_devices()
+        self._rebuild_menu()
+        log.info("Znaleziono %d mikrofon(ow)", len(self._devices))
+        self.notify(t("tray.devices_found", count=len(self._devices)))
+
+    def _rebuild_menu(self) -> None:
+        """Replace the whole menu, because pystray's is immutable once built.
+
+        Needed by anything that changes the *shape* or the fixed text of the
+        menu - a microphone list that grew, a language switch that renamed every
+        entry. Per-item callables (checked, visible, the labels carrying the
+        current choice) update on their own and need none of this.
+        """
         self._icon.menu = self._build_menu()
         self._icon.update_menu()
-        log.info("Znaleziono %d mikrofon(ow)", len(self._devices))
-        self.notify(f"Znaleziono {len(self._devices)} mikrofon(ow).")
+        try:
+            self._icon.title = self._tooltip()
+        except Exception:  # noqa: BLE001 - icon not yet realised
+            log.debug("Nie moge zaktualizowac tooltipa tray")
 
-    def _toggle_pause(self) -> None:
+    def _toggle_enabled(self) -> None:
+        """Master switch. Reads as on/off; the controller thinks in "paused"."""
         self.controller.set_paused(not self.controller.paused)
+
+    def _copy_last_transcription(self) -> None:
+        self.controller.copy_last_transcription()
 
     def _quit(self) -> None:
         log.info("Zamykanie z menu tray")

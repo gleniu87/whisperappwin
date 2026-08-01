@@ -135,8 +135,12 @@ class Recorder:
         self._lock = threading.Lock()
         self._level = 0.0
         self._capture_rate = TARGET_RATE
+        self._capture_channels = 1
         self._overflowed = False
         self._truncated = False
+        # device index -> (samplerate, channels) known to work, so the format
+        # fallback ladder is walked once instead of on every dictation.
+        self._format_cache: dict[int | None, tuple[int, int]] = {}
 
         #: Set by start() when the configured device could not be honoured, so
         #: the caller can tell the user instead of silently recording silence
@@ -176,9 +180,10 @@ class Recorder:
         self.fallback_note = None
 
         index = self._resolve_device_index()
-        self._stream, self._capture_rate = self._open_stream(index)
-        self._stream.start()
-        log.debug("Nagrywanie wystartowalo @ %d Hz", self._capture_rate)
+        self._stream, self._capture_rate, self._capture_channels = self._open_stream(index)
+        log.debug(
+            "Nagrywanie wystartowalo @ %d Hz, %d kanal(y)", self._capture_rate, self._capture_channels
+        )
 
     def _resolve_device_index(self) -> int | None:
         """Index of the configured device, or None to let Windows choose."""
@@ -230,38 +235,79 @@ class Recorder:
 
     # -- internals ------------------------------------------------------
 
-    def _open_stream(self, device: int | None) -> tuple[sd.InputStream, int]:
-        """Prefer capturing natively at 16 kHz; fall back to the device rate.
+    def _open_stream(self, device: int | None) -> tuple[sd.InputStream, int, int]:
+        """Open and start a capture stream, trying formats until one works.
 
-        WASAPI shared mode usually resamples for us, but exclusive-mode devices
-        and some USB interfaces reject a rate they do not support - in that case
-        we take whatever they offer and resample ourselves.
+        Two Windows realities drive this:
+
+        * A format can be accepted at open and rejected at start. WASAPI
+          validates lazily, so `InputStream(...)` succeeds and `.start()` then
+          fails with AUDCLNT_E_UNSUPPORTED_FORMAT. Starting must be part of the
+          attempt, or the failure escapes as a raw PortAudioError.
+        * A stereo device in shared mode may refuse a mono stream outright.
+          Asking for its native channel count and downmixing ourselves is the
+          reliable path.
+
+        The working combination is cached per device, so the fallback ladder is
+        walked once rather than on every dictation.
         """
-        try:
-            return self._make_stream(device, TARGET_RATE), TARGET_RATE
-        except sd.PortAudioError as exc:
-            log.info("Urzadzenie nie przyjmuje 16 kHz (%s) - probuje czestotliwosc natywna", exc)
+        cached = self._format_cache.get(device)
+        candidates = self._candidate_formats(device)
+        if cached is not None:
+            candidates = [cached] + [c for c in candidates if c != cached]
 
+        failures = []
+        for samplerate, channels in candidates:
+            stream = None
+            try:
+                stream = sd.InputStream(
+                    device=device,
+                    channels=channels,
+                    samplerate=samplerate,
+                    dtype="float32",
+                    blocksize=0,  # let PortAudio pick the lowest latency it can
+                    callback=self._callback,
+                )
+                self._capture_rate = samplerate
+                self._capture_channels = channels
+                stream.start()
+            except sd.PortAudioError as exc:
+                failures.append(f"{samplerate} Hz / {channels} ch: {exc}")
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except sd.PortAudioError:
+                        pass
+                continue
+
+            if cached != (samplerate, channels):
+                log.info("Format audio dla urzadzenia %s: %d Hz, %d kanal(y)", device, samplerate, channels)
+                self._format_cache[device] = (samplerate, channels)
+            return stream, samplerate, channels
+
+        raise AudioError("Nie moge otworzyc mikrofonu. Probowane formaty: " + "; ".join(failures))
+
+    def _candidate_formats(self, device: int | None) -> list[tuple[int, int]]:
+        """Formats to try, best first: native rate beats resampling, mono beats downmixing."""
+        native, max_channels = self._device_format(device)
+
+        candidates = [(TARGET_RATE, 1)]
+        if native != TARGET_RATE:
+            candidates.append((native, 1))
+        if max_channels > 1:
+            candidates.append((native, min(2, max_channels)))
+            if native != TARGET_RATE:
+                candidates.append((TARGET_RATE, min(2, max_channels)))
+        return candidates
+
+    @staticmethod
+    def _device_format(device: int | None) -> tuple[int, int]:
         try:
             info = sd.query_devices(device if device is not None else sd.default.device[0], "input")
-            native = int(info["default_samplerate"])
-        except (sd.PortAudioError, TypeError, KeyError, IndexError) as exc:
-            raise AudioError(f"Nie moge odczytac parametrow urzadzenia audio: {exc}") from exc
-
-        try:
-            return self._make_stream(device, native), native
-        except sd.PortAudioError as exc:
-            raise AudioError(f"Nie moge otworzyc mikrofonu: {exc}") from exc
-
-    def _make_stream(self, device: int | None, samplerate: int) -> sd.InputStream:
-        return sd.InputStream(
-            device=device,
-            channels=1,
-            samplerate=samplerate,
-            dtype="float32",
-            blocksize=0,  # let PortAudio choose; lowest-latency it can manage
-            callback=self._callback,
-        )
+            return int(info["default_samplerate"]), int(info["max_input_channels"])
+        except Exception as exc:  # noqa: BLE001 - PortAudio raises several types here
+            log.warning("Nie moge odczytac parametrow urzadzenia %s (%s) - zakladam 48 kHz stereo", device, exc)
+            return 48_000, 2
 
     def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001 - sounddevice API
         if status:
@@ -270,7 +316,9 @@ class Recorder:
             else:
                 log.debug("Status strumienia audio: %s", status)
 
-        block = indata[:, 0].copy()
+        # Downmix rather than taking channel 0: on a multi-capsule device like a
+        # conference speakerphone, one capsule can be far quieter than the others.
+        block = indata[:, 0].copy() if indata.shape[1] == 1 else indata.mean(axis=1)
         self._level = float(np.sqrt(np.mean(np.square(block)))) if frames else 0.0
 
         max_frames = int(self._max_seconds * self._capture_rate)

@@ -1,15 +1,48 @@
 # WhisperDictate for Windows
 
+> **Port na Windows aplikacji [WhisperDictate](https://github.com/jacek-gajewski-ice/whisper-app)
+> autorstwa Jacka Gajewskiego.** Oryginał działa wyłącznie na macOS. To jest
+> odtworzenie jego zachowania na Windows — pomysł, projekt i decyzje produktowe
+> pochodzą stamtąd.
+
 Lokalne dyktowanie *hold-to-talk*: przytrzymujesz klawisz, mówisz, puszczasz — tekst
 wkleja się tam, gdzie masz kursor. Wszystko liczy się na Twoim komputerze, nic nie
 wychodzi do chmury.
 
-Windowsowy odpowiednik macOS-owego
-[WhisperDictate](https://github.com/jacek-gajewski-ice/whisper-app). Odwzorowuje
-jego zachowanie, nie kod: oryginał to Swift + SwiftUI + AVFoundation + Core Audio i
-nie ma możliwości uruchomienia go tutaj. Zamiast whisper.cpp używamy
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2), który na
-GPU NVIDIA jest szybszy niż whisper.cpp, a na CPU porównywalny.
+## Stosunek do oryginału
+
+**To nie jest fork ani tłumaczenie kodu — to niezależna implementacja tego samego
+zachowania.** Nie dało się inaczej: oryginał to Swift + SwiftUI + AVFoundation +
+Core Audio, czyli frameworki, których na Windows po prostu nie ma. Żadna linijka
+kodu nie została przeniesiona, bo nie było czego przenosić.
+
+Co pochodzi z oryginału:
+
+- **Cały pomysł na produkt** — hold-to-talk, praca lokalna, ikona w zasobniku
+  zamiast okna, wklejanie do aktywnej aplikacji.
+- **Decyzje produktowe**, łącznie z tymi nieoczywistymi: czyszczenie tekstu przez
+  LLM **domyślnie wyłączone** (`Helpers.swift`: `enhanceTranscription = false`),
+  sentinel `EMPTY` na ciszę, fail-soft do surowej transkrypcji.
+- **Konstrukcja promptu czyszczącego** — `Enhancement/CustomPrompt.swift`, które
+  z kolei kredytuje [FreeFlow](https://github.com/zachlatta/freeflow)
+  i [VoiceInk](https://github.com/Beingpax/VoiceInk).
+
+Co jest tutejsze, bo musiało być:
+
+| | oryginał (macOS) | tutaj (Windows) |
+|---|---|---|
+| Silnik | whisper.cpp | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) / CTranslate2 |
+| Audio | AVFoundation / Core Audio | PortAudio przez `sounddevice`, z fallbackiem WASAPI → DirectSound → MME |
+| UI | SwiftUI | pystray + Tk |
+| Hotkey | Carbon / NSEvent | pynput, z obsługą kolizji AltGr na polskim układzie |
+| Klucze API | Keychain | Menedżer poświadczeń Windows |
+
+Doszło też kilka rzeczy, których oryginał nie ma, bo wynikają z Windows albo
+z pracy po polsku: wybór mikrofonu po nazwie (indeksy PortAudio się przesuwają),
+polskie słownictwo przerywników w prompcie, słownik nazw własnych zasilający
+Whispera i model czyszczący, oraz providerzy DeepSeek i Claude Code CLI.
+
+Na GPU NVIDIA faster-whisper jest szybszy niż whisper.cpp, a na CPU porównywalny.
 
 ## Wymagania
 
@@ -398,8 +431,9 @@ właściwego mikrofonu.
 Oryginał ma kilka rzeczy, których ta wersja świadomie nie odtwarza:
 
 - **Providerzy OpenAI, OpenRouter i Ollama** dla czyszczenia tekstu. Zaimplementowane
-  są dwa: Anthropic API i Claude Code CLI. Interfejs `Provider` jest jednometodowy,
-  więc dołożenie kolejnego to jedna klasa.
+  są trzy: Anthropic API, DeepSeek API i Claude Code CLI (dwa ostatnie to dodatek,
+  oryginał ich nie ma). Interfejs `Provider` jest jednometodowy, więc dołożenie
+  kolejnego to jedna klasa.
 - **Okno z dashboardem** (8 zakładek, statystyki, przeglądarka historii). Historia
   jest zapisywana do JSONL, ale przegląda się ją w edytorze.
 - **Pobieranie modeli z paskiem postępu.** Zajmuje się tym Hugging Face Hub.
@@ -407,6 +441,24 @@ Oryginał ma kilka rzeczy, których ta wersja świadomie nie odtwarza:
 Architektura jest rozdzielona (rdzeń nie wie nic o UI), więc dołożenie okna nie
 wymaga przepisywania logiki. Szczegóły: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+## Podziękowania
+
+- **[Jacek Gajewski](https://github.com/jacek-gajewski-ice)** — autor oryginalnego
+  [WhisperDictate](https://github.com/jacek-gajewski-ice/whisper-app) na macOS.
+  Ten projekt istnieje, bo tamten istniał pierwszy: pomysł, projekt interakcji
+  i decyzje produktowe są jego. Jego `CLAUDE.md` z notatkami inżynierskimi był
+  najlepszą dokumentacją, jaką można było mieć przy odtwarzaniu zachowania.
+- **[FreeFlow](https://github.com/zachlatta/freeflow)**
+  i **[VoiceInk](https://github.com/Beingpax/VoiceInk)** — wzorzec promptu
+  czyszczącego, za oryginałem, który je kredytuje.
+- **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** (SYSTRAN)
+  i **[CTranslate2](https://github.com/OpenNMT/CTranslate2)** — silnik transkrypcji.
+- **[Whisper](https://github.com/openai/whisper)** (OpenAI) — model.
+
 ## Licencja
 
 Kod tego repozytorium: MIT. Modele Whisper: MIT (OpenAI). faster-whisper: MIT.
+
+Kod nie jest pochodną oryginału (żadna linijka nie została przeniesiona — to inny
+język i inne frameworki), więc licencja tamtego projektu nie ma tu zastosowania.
+Atrybucja powyżej jest kwestią uczciwości, nie wymogu prawnego.

@@ -363,6 +363,54 @@ def cmd_benchmark(config: Config, text: str) -> int:
     return 0
 
 
+def cmd_suggest_vocabulary(config: Config) -> int:
+    """List names the clean-up model repaired that are not in the vocabulary yet.
+
+    The manual half of the same mechanism the tray uses: no notifications, no
+    state, just what the history already knows.
+    """
+    from .history import History
+
+    history = History(paths.history_path(), enabled=True)
+    entries = history.recent(1000)
+    known = config.get("transcription.vocabulary", "")
+    found = vocabulary.pending(entries, known, config.get("transcription.vocabulary_rejected", ""))
+
+    paired = sum(1 for e in entries if e.get("raw_text"))
+    print(f"Przejrzano {len(entries)} wpisow historii ({paired} z czyszczeniem).")
+    if known:
+        print(f"W slowniku juz: {', '.join(vocabulary.terms(known))}")
+
+    if not found:
+        print("\nBrak nowych kandydatow.")
+        print("Kandydat powstaje, gdy model czyszczacy sam poprawi przekrecona nazwe.")
+        return 0
+
+    print(f"\nKandydaci ({len(found)}):")
+    for item in found:
+        print(f"  {item.corrected:<24} <- Whisper uslyszal {item.heard!r}")
+
+    proposed = ", ".join(i.corrected for i in found)
+    print("\nDopisz te, ktore sa nazwami wlasnymi (w formie podstawowej):")
+    print(f'  .\\run.ps1 -AddVocabulary "{proposed}"')
+    return 0
+
+
+def cmd_add_vocabulary(config: Config, raw: str) -> int:
+    """Append terms to the vocabulary from the command line."""
+    before = config.get("transcription.vocabulary", "")
+    updated = before
+    for term in vocabulary.terms(raw):
+        updated = vocabulary.add(updated, term)
+    config.set("transcription.vocabulary", updated)
+
+    added = [t for t in vocabulary.terms(updated) if t not in vocabulary.terms(before)]
+    print(f"Dopisano {len(added)}: {', '.join(added)}" if added else "Nic nowego do dopisania.")
+    print(f"Slownik ({len(vocabulary.terms(updated))}): {updated}")
+    print("\nDziala od nastepnego uruchomienia aplikacji (albo od razu, jesli zmienisz w tray).")
+    return 0
+
+
 def _combos_for(provider_filter: str | None):
     """(provider, model) pairs to compare — every model of every provider."""
     from .enhance import PROVIDERS as PROVIDER_SPECS
@@ -517,6 +565,7 @@ def run_app(config: Config) -> int:
         on_cancel=controller.on_cancel,
     )
     controller.attach_hotkey(listener)
+    controller.refresh_vocabulary_suggestions()
 
     signal.signal(signal.SIGINT, lambda *_: quit_event.set())
 
@@ -594,6 +643,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--quality", action="store_true",
         help="porownanie jakosciowe na stalym zestawie trudnych transkrypcji",
     )
+    parser.add_argument(
+        "--suggest-vocabulary", action="store_true",
+        help="wypisz nazwy wlasne, ktore model czyszczacy poprawil sam",
+    )
+    parser.add_argument(
+        "--add-vocabulary", metavar="NAZWY",
+        help="dopisz nazwy (po przecinku) do slownika",
+    )
     return parser.parse_args(argv)
 
 
@@ -610,6 +667,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_benchmark(config, args.benchmark)
     if args.quality:
         return cmd_quality(config, args.provider)
+    if args.suggest_vocabulary:
+        return cmd_suggest_vocabulary(config)
+    if args.add_vocabulary is not None:
+        return cmd_add_vocabulary(config, args.add_vocabulary)
     if args.list_devices:
         return cmd_list_devices(all_host_apis=args.all)
     if args.check:

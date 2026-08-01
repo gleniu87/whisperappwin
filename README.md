@@ -124,6 +124,50 @@ zostawia przekręcony tekst w historii i nie pomaga przy wyłączonym czyszczeni
 Prompt zawiera jawny zakaz dopisywania nazw z listy do transkrypcji, w których nic
 ich nie przypomina — bez tego model zaczyna je wstawiać tam, gdzie ich nie było.
 
+Zmierzony efekt drugiej połowy (`deepseek-v4-flash`, ten sam tekst, po 3 przebiegi):
+
+| | `DeepSeek` poprawnie | `Sonnet` poprawnie |
+|---|---|---|
+| bez słownika | 2 / 3 | **0 / 3** |
+| ze słownikiem | 3 / 3 | **2 / 3** |
+
+Wpływ na priming Whispera nie został zmierzony — to udokumentowane zachowanie
+`initial_prompt`, nie pomiar na konkretnym głosie.
+
+#### Słownik, który uzupełnia się sam
+
+Czasem model czyszczący **sam** rozpozna przekręconą nazwę z kontekstu — tak Sonnet
+zamienił `Dipsick` na `Deepseek`, nie mając żadnego słownika. Taka poprawka
+naprawia jednak tylko ten jeden tekst: Whisper się nie uczy i następnym razem
+przekręci nazwę tak samo.
+
+Aplikacja wyłapuje te momenty, porównując `raw_text` z tekstem po czyszczeniu
+w historii, i proponuje dopisanie nazwy do słownika. Wtedy zaczyna działać
+zapobiegawczo — **mocniejszy model uczy słabszego raz, a potem problem nie
+powstaje**. Za rozpoznanie płacisz jeden raz, nie przy każdym dyktowaniu.
+
+```powershell
+.\run.ps1 -SuggestVocabulary              # co znalazło w historii
+.\run.ps1 -AddVocabulary "DeepSeek, Sonnet"
+```
+
+W trybie automatycznym (*Czyszczenie tekstu* → *Proponuj nazwy wlasne*, domyślnie
+włączone) po dyktowaniu pojawia się dymek, a w menu licznik *Propozycje slownika (N)...*
+— widoczny tylko wtedy, gdy jest co przeglądać. Nic nie kradnie focusu i **nic nie
+trafia do słownika bez Twojego potwierdzenia**: błędny wpis psułby wszystkie
+przyszłe dyktowania, i to u źródła. Puste pole w oknie propozycji oznacza „nie
+pytaj o to słowo ponownie".
+
+Filtr jest celowo ostry, bo model czyszczący zmienia mnóstwo słów. Odpadają
+różnice wyłącznie w diakrytykach i wielkości liter (`wez`→`weź`), odmiana tego
+samego rdzenia (`alta`→`Altu`), zamiany bez podobieństwa brzmienia i przeróbki
+wielu słów naraz. Zostają zamiany jedno słowo na jedno, brzmiące podobnie, gdzie
+wynik wygląda na nazwę własną. Na 22 dyktowaniach dało to 1 kandydata — trafionego.
+
+Ograniczenie, które warto znać: to nie pomoże przy nazwie, której model czyszczący
+**nigdy** nie zgadnie. Pierwsze wystąpienie czegoś zupełnie nietypowego trzeba
+wpisać ręcznie. To uzupełnienie ręcznego słownika, nie zamiennik.
+
 ## Czyszczenie tekstu przez LLM
 
 Surowa transkrypcja zawiera wszystko, co powiedziałeś — łącznie z `yyy`, `no więc`,

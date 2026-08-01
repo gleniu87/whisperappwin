@@ -19,9 +19,23 @@ clean-up is switched off.
 
 from __future__ import annotations
 
+import re
+import unicodedata
+from dataclasses import dataclass
+from difflib import SequenceMatcher
+
 #: Splitting on commas only. Proper nouns contain spaces ("Claude Code",
 #: "ICE InsureTech"), so whitespace is not a separator.
 _SEPARATOR = ","
+
+#: Below this, two words are not the same word misheard - they are two words.
+_SIMILARITY_FLOOR = 0.55
+
+#: Shorter tokens produce noise: at three characters almost anything is 0.55
+#: similar to anything else.
+_MIN_LENGTH = 4
+
+_WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 
 def terms(raw: str | None) -> tuple[str, ...]:
@@ -51,6 +65,128 @@ def whisper_priming(raw: str | None, initial_prompt: str | None = "") -> str:
     if names:
         parts.append(", ".join(names) + ".")
     return " ".join(parts)
+
+
+@dataclass(frozen=True)
+class Suggestion:
+    """A name the clean-up model appears to have repaired on its own."""
+
+    heard: str      # what Whisper produced ("dipsyka")
+    corrected: str  # what the clean-up model made of it ("DeepSeeka")
+
+
+#: NFD decomposes ą ć ę ń ó ś ź ż into a base letter plus a combining mark, but
+#: not ł - U+0142 is an atomic codepoint with no decomposition. Without this,
+#: "ustawilem" and "ustawiłem" compare as different words, which knocks the
+#: whole word alignment out of step on most Polish sentences.
+_ATOMIC = str.maketrans({"ł": "l", "Ł": "L"})
+
+
+def _fold(word: str) -> str:
+    """Lowercase, diacritics stripped - the form used only for comparison."""
+    decomposed = unicodedata.normalize("NFD", word.lower().translate(_ATOMIC))
+    return "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+
+
+def _looks_like_a_name(word: str) -> bool:
+    """An initial capital, or an inner one (camelCase, DeepSeek, ICE)."""
+    return word[:1].isupper() or any(c.isupper() for c in word[1:])
+
+
+def _differs_only_in_ending(left: str, right: str) -> bool:
+    """Same stem, different inflection - "alta" vs "Altu", not a misheard name.
+
+    Found on real history: the clean-up model fixing Polish grammar around a
+    capitalised word looks exactly like a name repair unless this is excluded.
+    """
+    shared = 0
+    for a, b in zip(left, right):
+        if a != b:
+            break
+        shared += 1
+    return shared >= min(len(left), len(right)) - 1
+
+
+def _is_repair(heard: str, corrected: str) -> bool:
+    """True when this substitution looks like a mangled name being restored.
+
+    The filters exist because a clean-up model rewrites a great deal that has
+    nothing to do with proper nouns. Without them the user would be asked about
+    every second word, and a suggestion list nobody reads is worse than none.
+    """
+    if len(heard) < _MIN_LENGTH or len(corrected) < _MIN_LENGTH:
+        return False
+    if not _looks_like_a_name(corrected):
+        return False
+
+    left, right = _fold(heard), _fold(corrected)
+    if left == right:
+        # Differs only in diacritics or capitalisation: "wez" -> "weź". That is
+        # ordinary spelling repair, not a name the decoder failed to recognise.
+        return False
+    if _differs_only_in_ending(left, right):
+        return False
+    similarity = SequenceMatcher(None, left, right).ratio()
+    return similarity >= _SIMILARITY_FLOOR
+
+
+def detect(heard_text: str | None, cleaned_text: str | None) -> list[Suggestion]:
+    """Word substitutions between a raw transcript and its cleaned version.
+
+    Aligns the two word sequences and keeps one-for-one replacements that pass
+    `_is_repair`. This is the only free signal available: the clean-up model
+    occasionally recognises a mangled name from context, and that guess is worth
+    keeping - moved into the vocabulary it stops the mishearing at the source,
+    where even a weaker model never has to guess again.
+    """
+    heard_words = _WORD.findall(heard_text or "")
+    clean_words = _WORD.findall(cleaned_text or "")
+    if not heard_words or not clean_words:
+        return []
+
+    found: list[Suggestion] = []
+    matcher = SequenceMatcher(
+        None, [_fold(w) for w in heard_words], [_fold(w) for w in clean_words]
+    )
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        # Only 1:1 swaps. A run of replaced words is a rephrasing, not a name.
+        if tag != "replace" or (i2 - i1) != 1 or (j2 - j1) != 1:
+            continue
+        heard, corrected = heard_words[i1], clean_words[j1]
+        if _is_repair(heard, corrected):
+            found.append(Suggestion(heard=heard, corrected=corrected))
+    return found
+
+
+def pending(entries, known: str | None, rejected: str | None) -> list[Suggestion]:
+    """Suggestions from history entries, minus what is already settled.
+
+    Regenerated from history rather than stored: history is the source of truth,
+    so there is no separate list to keep in sync, and accepting a name makes its
+    suggestion disappear on its own.
+    """
+    settled = {_fold(t) for t in terms(known)} | {_fold(t) for t in terms(rejected)}
+    seen: dict[str, Suggestion] = {}
+    for entry in entries:
+        for found in detect(entry.get("raw_text"), entry.get("text")):
+            key = _fold(found.corrected)
+            if key in settled or key in seen:
+                continue
+            # A name is settled once accepted in any inflected form; matching on
+            # the stem keeps "DeepSeeka" from being offered after "DeepSeek".
+            if any(key.startswith(s) or s.startswith(key) for s in settled):
+                continue
+            seen[key] = found
+    return list(seen.values())
+
+
+def add(known: str | None, term: str) -> str:
+    """Append a term to a comma-separated list, without duplicating it."""
+    existing = list(terms(known))
+    cleaned = " ".join(str(term or "").split())
+    if cleaned and _fold(cleaned) not in {_fold(t) for t in existing}:
+        existing.append(cleaned)
+    return ", ".join(existing)
 
 
 def prompt_section(raw: str | None) -> str:

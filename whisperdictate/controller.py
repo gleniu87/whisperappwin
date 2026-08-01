@@ -72,6 +72,9 @@ class DictationController:
         self._paused = False
         self._lock = threading.Lock()
         self._workers: set[threading.Thread] = set()
+        # Populated on demand; the tray reads it every time the menu opens, so
+        # it must never be a history scan.
+        self._pending_vocabulary: list = []
 
     # -- wiring ---------------------------------------------------------
 
@@ -340,6 +343,75 @@ class DictationController:
         if enhancement is not None:
             detail += f", oczyszczone +{enhancement.elapsed_seconds:.1f} s"
         self._set_state(State.IDLE, detail)
+
+        # Last, and never in the way: the paste has already happened, so a
+        # failure here costs a suggestion, not the dictation.
+        if enhancement is not None:
+            self._offer_vocabulary(raw_text, text)
+
+    # -- vocabulary suggestions -------------------------------------------
+
+    #: Scanning the whole history on every dictation would grow unbounded.
+    _SUGGESTION_WINDOW = 300
+
+    @property
+    def pending_vocabulary(self) -> list:
+        """Names the clean-up model repaired that are neither known nor refused."""
+        return list(self._pending_vocabulary)
+
+    def refresh_vocabulary_suggestions(self) -> None:
+        from . import vocabulary
+
+        try:
+            entries = self.history.recent(self._SUGGESTION_WINDOW)
+        except Exception:  # noqa: BLE001 - a suggestion is never worth an exception
+            log.debug("Nie moge odczytac historii dla propozycji slownika")
+            return
+        self._pending_vocabulary = vocabulary.pending(
+            entries,
+            self.config.get("transcription.vocabulary", ""),
+            self.config.get("transcription.vocabulary_rejected", ""),
+        )
+
+    def _offer_vocabulary(self, raw_text: str, cleaned: str) -> None:
+        """Notify only when this dictation produced something new."""
+        if not self.config.get("transcription.suggest_vocabulary", True):
+            return
+        from . import vocabulary
+
+        before = {s.corrected for s in self._pending_vocabulary}
+        self.refresh_vocabulary_suggestions()
+        fresh = [s for s in self._pending_vocabulary if s.corrected not in before]
+        if not fresh:
+            return
+
+        found = fresh[0]
+        log.info("Kandydat do slownika: %r -> %r", found.heard, found.corrected)
+        self._notify(
+            f"Nowa nazwa wlasna? {found.heard} -> {found.corrected}. "
+            "Menu tray > Czyszczenie tekstu > Propozycje slownika."
+        )
+
+    def accept_vocabulary(self, term: str) -> None:
+        from . import vocabulary
+
+        self.set_vocabulary(vocabulary.add(self.config.get("transcription.vocabulary", ""), term))
+        self.refresh_vocabulary_suggestions()
+
+    def reject_vocabulary(self, term: str) -> None:
+        """'Never ask again' for one name, so a refusal does not come back."""
+        from . import vocabulary
+
+        self.config.set(
+            "transcription.vocabulary_rejected",
+            vocabulary.add(self.config.get("transcription.vocabulary_rejected", ""), term),
+        )
+        self.refresh_vocabulary_suggestions()
+
+    def set_suggest_vocabulary(self, enabled: bool) -> None:
+        self.config.set("transcription.suggest_vocabulary", enabled)
+        log.info("Propozycje slownika %s", "wlaczone" if enabled else "wylaczone")
+        self._set_state(self._state)
 
     # -- helpers ----------------------------------------------------------
 

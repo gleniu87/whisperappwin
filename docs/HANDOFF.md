@@ -32,7 +32,7 @@ odtwarzaniem kolejnej funkcji.
 | Sprzęt | i7-12700H, 64 GB RAM, RTX 3070 Ti Laptop (8 GB VRAM) |
 | GPU | działa: `large-v3-turbo @ cuda/float16`, ~29× realtime |
 | Mikrofon | `audio.device = "Mikrofon (Anker PowerConf C200)"` |
-| Testy | **239, wszystkie przechodzą** — `.\.venv\Scripts\python.exe -m unittest discover -s tests -t .` |
+| Testy | **265, wszystkie przechodzą** — `.\.venv\Scripts\python.exe -m unittest discover -s tests -t .` |
 
 Uruchamianie: `.\run.ps1` (z konsolą) albo `.\run.ps1 -Hidden` (tylko tray).
 Diagnostyka: `.\run.ps1 -Check`.
@@ -110,11 +110,12 @@ Tekst testowy (przerywniki, autopoprawka `handler znaczy parser`, identyfikator
 
 ## Czego NIE zweryfikowano na żywo (nowe w tej sesji)
 
-- **Słownik nazw własnych** — logika pokryta testami, ale **nie sprawdzona
-  nagraniem**. Nie wiem, o ile realnie poprawia rozpoznanie u tego użytkownika;
-  `initial_prompt` Whispera to mechanizm udokumentowany, nie mój pomiar.
-  To pierwsza rzecz do sprawdzenia: wpisz nazwy, podyktuj zdanie z „DeepSeek",
-  porównaj `raw_text` w `history.jsonl` przed i po.
+- **Priming Whispera słownikiem** — połowa promptowa jest zmierzona (niżej),
+  ale wpływ na **rozpoznanie** nie. Wymaga nagrania. To pierwsza rzecz do
+  sprawdzenia: wpisz nazwy, podyktuj zdanie z „DeepSeek", porównaj `raw_text`
+  w `history.jsonl` przed i po.
+- **Dymek z propozycją po dyktowaniu** — kod jest, ale nie widziałem go na oczy.
+  Wymaga realnego dyktowania, w którym model coś poprawi.
 - **Zmiana hotkeya w locie** (`HotkeyListener.set_key`) — pokryta testami
   jednostkowymi, nieklikana w prawdziwym trayu.
 - **Dialog *Nazwy wlasne...*** — wymaga dispatchera Tk, nietestowalny headless.
@@ -186,6 +187,18 @@ w `history.jsonl` i nie działa przy wyłączonym czyszczeniu. Sekcja promptu ma
 jawny zakaz dopisywania nazw z listy — bez niego model wstawia je tam, gdzie ich
 nie było.
 
+**Propozycje słownika NIGDY nie dopisują się same.** Próg to jedno wystąpienie —
+i jest bezpieczny wyłącznie dlatego, że filtrem jest użytkownik. Gdyby wpisy
+lądowały w słowniku bez potwierdzenia, błędny wpis trafiłby do `initial_prompt`
+i psuł **wszystkie** przyszłe dyktowania, w dodatku u źródła. Nie „usprawniaj"
+tego na automatyczne dodawanie.
+
+**`_fold()` ręcznie mapuje `ł` → `l`.** To nie jest nadgorliwość: `ł` (U+0142) to
+atomowy codepoint **bez dekompozycji NFD**, w przeciwieństwie do ą, ć, ę, ń, ó, ś,
+ź, ż. Bez tej mapy „ustawilem" i „ustawiłem" porównują się jako różne słowa,
+co rozjeżdża dopasowanie sekwencji i gubi prawdziwą poprawkę w tym samym zdaniu.
+Kosztowało trzy padnięte testy, zanim to zobaczyłem.
+
 **Domyślny model DeepSeeka to Flash — na wyraźne życzenie użytkownika.** Powód,
 który podał (Pro wolniejszy), **nie potwierdził się w pomiarach**: Pro wyszedł
 1,54 s przeciw 1,60 s Flasha, czyli szybciej. Powiedziałem mu to; wybór Flasha
@@ -229,6 +242,9 @@ produkcyjny (`118fe29`).
 | Dyktowanie 938 znaków: Sonnet / Flash | 10,2 s / 3,7 s — czas rośnie z długością |
 | `--quality`, 12 przypadków, błędy | pro 0, flash 0, haiku 0, sonnet 1 |
 | `--quality`, średni czas na przypadek | pro 1,54 s, flash 1,60 s, sonnet 4,25 s, haiku 20,9 s |
+| Słownik w prompcie, flash, `Sonnet` poprawnie | **0/3 bez słownika → 2/3 ze słownikiem** |
+| Słownik w prompcie, flash, `DeepSeek` poprawnie | 2/3 → 3/3 (mała próbka, kierunek jasny) |
+| Kandydaci do słownika z 22 dyktowań | 1, trafiony (po odfiltrowaniu odmiany `alta`→`Altu`) |
 | Haiku 4.5 | $1 / $5 za 1M, ~$0.0026 na dyktowanie |
 | DeepSeek V4 Flash | $0.14 / $0.28 za 1M, ~$0.00025 na dyktowanie |
 | Prompt systemowy `default` + lock `pl` | 3425 znaków, ~1150 tokenów wejścia |

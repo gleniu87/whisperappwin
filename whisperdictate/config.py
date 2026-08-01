@@ -56,6 +56,12 @@ DEFAULTS: dict[str, Any] = {
         # clean-up model, so a name that still comes back garbled can be
         # repaired. See whisperdictate/vocabulary.py.
         "vocabulary": "",
+        # Watch for names the clean-up model repaired on its own and offer to
+        # add them here. Only a tray balloon and a menu counter - nothing steals
+        # focus, and nothing is added without confirmation.
+        "suggest_vocabulary": True,
+        # Suggestions dismissed with "never ask again", so they stop coming back.
+        "vocabulary_rejected": "",
     },
     "audio": {
         "device": None,

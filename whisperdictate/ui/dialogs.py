@@ -11,6 +11,48 @@ from ..enhance import credentials, spec
 log = logging.getLogger(__name__)
 
 
+def review_vocabulary_suggestions(root: tk.Tk, controller) -> None:  # noqa: ANN001
+    """Walk the pending suggestions, one at a time.
+
+    The proposed term is editable because the clean-up model returns whatever
+    form the sentence needed ("DeepSeeka"), while the vocabulary wants the base
+    form ("DeepSeek").
+    """
+    pending = controller.pending_vocabulary
+    if not pending:
+        root.attributes("-topmost", True)
+        try:
+            messagebox.showinfo(
+                "WhisperDictate", "Brak nowych propozycji.", parent=root
+            )
+        finally:
+            root.attributes("-topmost", False)
+        return
+
+    root.attributes("-topmost", True)
+    try:
+        for found in pending:
+            answer = simpledialog.askstring(
+                "WhisperDictate - nowa nazwa wlasna?",
+                f"Model czyszczacy poprawil:\n\n"
+                f"     {found.heard}  ->  {found.corrected}\n\n"
+                "Wpisz forme podstawowa, zeby dopisac do slownika.\n"
+                "Whisper bedzie odtad nastawiony na te pisownie.\n\n"
+                "Puste pole = nie pytaj o to slowo ponownie.\n"
+                "Anuluj = zostaw na pozniej.",
+                initialvalue=found.corrected,
+                parent=root,
+            )
+            if answer is None:
+                return  # leave the rest pending
+            if answer.strip():
+                controller.accept_vocabulary(answer)
+            else:
+                controller.reject_vocabulary(found.corrected)
+    finally:
+        root.attributes("-topmost", False)
+
+
 def edit_vocabulary(root: tk.Tk, controller) -> None:  # noqa: ANN001 - avoids a circular import
     """Edit the comma-separated proper-noun list."""
     from ..vocabulary import terms

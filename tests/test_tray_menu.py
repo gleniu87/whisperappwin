@@ -38,6 +38,7 @@ class FakeController:
         self.state = State.IDLE
         self.paused = False
         self.calls = []
+        self._pending = []
         self.transcriber = mock.Mock(model_name="large-v3-turbo", description="large-v3-turbo @ cpu/int8")
         self.enhancement = EnhancementService(config)
 
@@ -75,6 +76,14 @@ class FakeController:
     def set_vocabulary(self, raw):
         self.calls.append(("vocabulary", raw))
         self.config.set("transcription.vocabulary", raw)
+
+    def set_suggest_vocabulary(self, enabled):
+        self.calls.append(("suggest_vocabulary", enabled))
+        self.config.set("transcription.suggest_vocabulary", enabled)
+
+    @property
+    def pending_vocabulary(self):
+        return self._pending
 
     def set_paused(self, paused):
         self.calls.append(("paused", paused))
@@ -310,6 +319,62 @@ class TrayMenuTest(unittest.TestCase):
     def test_tooltip_fits_the_windows_limit(self):
         self.config.set("audio.device", "X" * 300)
         self.assertLessEqual(len(self.tray._tooltip()), 127)
+
+
+class SuggestionMenuTest(unittest.TestCase):
+    """The suggestion entries only exist when there is a Tk thread to open a
+    dialog on, so this builds the tray with a dispatcher."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.config = Config.load(Path(self._tmp.name) / "config.toml")
+
+        from whisperdictate.ui import tray as tray_module
+
+        patcher = mock.patch.object(tray_module, "list_input_devices", lambda **_: FAKE_DEVICES)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        self.controller = FakeController(self.config)
+        self.tray = tray_module.Tray(
+            controller=self.controller,
+            config=self.config,
+            on_quit=lambda: None,
+            dispatcher=mock.Mock(),
+        )
+
+    def cleanup_items(self):
+        for item in self.tray._icon.menu:
+            if str(item.text) == "Czyszczenie tekstu":
+                return list(item.submenu)
+        raise AssertionError("brak podmenu")
+
+    def test_counter_is_hidden_when_there_is_nothing_to_review(self):
+        labels = [str(i.text) for i in self.cleanup_items()]
+        self.assertFalse([t for t in labels if t.startswith("Propozycje")], labels)
+
+    def test_counter_appears_and_counts(self):
+        from whisperdictate.vocabulary import Suggestion
+
+        self.controller._pending = [
+            Suggestion("dipsyka", "DeepSeeka"),
+            Suggestion("antropica", "Anthropica"),
+        ]
+        labels = [str(i.text) for i in self.cleanup_items()]
+        self.assertIn("Propozycje slownika (2)...", labels)
+
+    def test_suggestions_can_be_switched_off(self):
+        toggle = next(
+            i for i in self.cleanup_items() if str(i.text) == "Proponuj nazwy wlasne"
+        )
+        self.assertTrue(toggle.checked)  # on by default
+        toggle(SENTINEL_ICON)
+        self.assertEqual(self.controller.calls, [("suggest_vocabulary", False)])
+
+    def test_vocabulary_entry_is_present(self):
+        labels = [str(i.text) for i in self.cleanup_items()]
+        self.assertIn("Nazwy wlasne...", labels)
 
 
 if __name__ == "__main__":

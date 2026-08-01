@@ -277,6 +277,24 @@ class Tray:
 
         if self._dispatcher is not None:
             items.append(pystray.Menu.SEPARATOR)
+            items.append(
+                item(
+                    "Proponuj nazwy wlasne",
+                    self._toggle_suggestions,
+                    checked=lambda _: bool(
+                        self.config.get("transcription.suggest_vocabulary", True)
+                    ),
+                )
+            )
+            # Hidden at zero rather than greyed out: a permanent "(0)" trains the
+            # eye to skip the entry, which is the one place the count matters.
+            items.append(
+                item(
+                    lambda _: f"Propozycje slownika ({len(self.controller.pending_vocabulary)})...",
+                    self._open_suggestions,
+                    visible=lambda _: bool(self.controller.pending_vocabulary),
+                )
+            )
             items.append(item("Nazwy wlasne...", self._open_vocabulary))
             for provider_key in ENHANCEMENT_PROVIDERS:
                 if PROVIDER_SPECS[provider_key].env_var is None:
@@ -289,6 +307,20 @@ class Tray:
 
         self._dispatcher.call(
             lambda: dialogs.edit_vocabulary(self._dispatcher.root, self.controller)
+        )
+
+    def _open_suggestions(self) -> None:
+        from . import dialogs
+
+        self._dispatcher.call(
+            lambda: dialogs.review_vocabulary_suggestions(
+                self._dispatcher.root, self.controller
+            )
+        )
+
+    def _toggle_suggestions(self) -> None:
+        self.controller.set_suggest_vocabulary(
+            not bool(self.config.get("transcription.suggest_vocabulary", True))
         )
 
     def _radio(self, dotted: str, value: str, label: str, setter) -> pystray.MenuItem:  # noqa: ANN001

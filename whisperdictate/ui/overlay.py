@@ -115,7 +115,7 @@ class Overlay:
             # window the user is dictating into.
             window.attributes("-disabled", True)
         except tk.TclError:  # pragma: no cover - older Tk
-            log.debug("Tk nie wspiera -disabled; overlay moze przejmowac focus")
+            log.debug("Tk does not support -disabled; the overlay may steal focus")
 
         canvas = tk.Canvas(window, width=WIDTH, height=HEIGHT, bg=BG, highlightthickness=0)
         canvas.pack()

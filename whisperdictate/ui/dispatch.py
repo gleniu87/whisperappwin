@@ -36,7 +36,7 @@ class MainThreadDispatcher:
                 try:
                     func()
                 except Exception:  # noqa: BLE001 - a bad dialog must not kill the loop
-                    log.exception("Blad w zadaniu na watku glownym")
+                    log.exception("Error in a task on the main thread")
         except queue.Empty:
             pass
         self.root.after(POLL_MS, self._drain)

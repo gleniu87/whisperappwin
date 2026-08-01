@@ -18,7 +18,7 @@ class CheckTest(unittest.TestCase):
 
     def test_missing_identifier_is_flagged(self):
         case = Case(name="x", text="raw", must_keep=("user_id",))
-        self.assertIn("zgubiono 'user_id'", check(case, "Sprawdź parser user id."))
+        self.assertIn("lost 'user_id'", check(case, "Sprawdź parser user id."))
 
     def test_identifier_match_is_case_sensitive(self):
         """getUserProfile rewritten as GetUserProfile is still a mangled name."""
@@ -27,7 +27,7 @@ class CheckTest(unittest.TestCase):
 
     def test_leftover_filler_is_flagged(self):
         case = Case(name="x", text="raw", must_drop=("jakby",))
-        self.assertIn("zostawiono 'jakby'", check(case, "To jakby działa."))
+        self.assertIn("kept 'jakby'", check(case, "To jakby działa."))
 
     def test_filler_is_matched_on_word_boundaries(self):
         """'no' must not match inside 'nowy' — that would fail a clean result."""
@@ -48,11 +48,11 @@ class CheckTest(unittest.TestCase):
 
     def test_unexpected_empty_is_flagged_as_a_lost_dictation(self):
         case = Case(name="x", text="raw")
-        self.assertIn("pusty wynik - tekst zniknalby przy wklejaniu", check(case, ""))
+        self.assertIn("empty result - the text would vanish on paste", check(case, ""))
 
     def test_provider_failure_is_reported_not_swallowed(self):
         case = Case(name="x", text="raw")
-        self.assertEqual(check(case, None), ["provider nie odpowiedzial"])
+        self.assertEqual(check(case, None), ["the provider did not answer"])
 
     def test_answering_instead_of_cleaning_is_flagged(self):
         case = Case(name="x", text="raw", must_not_contain=("def ",))
@@ -67,19 +67,19 @@ class CaseResultTest(unittest.TestCase):
     def test_failed_is_a_bool_not_the_violation_list(self):
         """The summary does sum(r.failed ...) — a list here is a TypeError."""
         case = Case(name="x", text="raw", must_keep=("user_id",))
-        result = quality.CaseResult(case, "brak", 1.0, check(case, "brak"))
+        result = quality.CaseResult(case, "nothing", 1.0, check(case, "nothing"))
         self.assertIsInstance(result.failed, bool)
         self.assertTrue(result.failed)
         self.assertEqual(sum(r.failed for r in [result]), 1)
 
     def test_clean_result_is_not_failed(self):
-        result = quality.CaseResult(Case(name="x", text="raw"), "Gotowe.", 1.0, [])
+        result = quality.CaseResult(Case(name="x", text="raw"), "Done.", 1.0, [])
         self.assertFalse(result.failed)
         self.assertEqual(result.status, "OK")
 
-    def test_provider_failure_reads_as_awaria(self):
+    def test_provider_failure_reads_as_a_crash(self):
         result = quality.CaseResult(Case(name="x", text="raw"), None, 1.0, ["x"])
-        self.assertEqual(result.status, "AWARIA")
+        self.assertEqual(result.status, "CRASH")
 
 
 class ContrastCaseTest(unittest.TestCase):
@@ -90,7 +90,7 @@ class ContrastCaseTest(unittest.TestCase):
     """
 
     def _case(self):
-        return next(c for c in quality.CASES if c.name == "nie-jako-przeczenie")
+        return next(c for c in quality.CASES if c.name == "negation-not-correction")
 
     def test_keeping_the_contrast_passes(self):
         good = "Spotkanie jest we wtorek, nie w środę, i to nie jest problem dla mnie."

@@ -80,7 +80,7 @@ def get_clipboard_text() -> str | None:
             return None
         return win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
     except Exception as exc:  # noqa: BLE001
-        log.debug("Nie moge odczytac schowka: %s", exc)
+        log.debug("Cannot read the clipboard: %s", exc)
         return None
     finally:
         _close_quietly()
@@ -112,7 +112,7 @@ def _mark_excluded_from_history() -> None:
                 win32clipboard.RegisterClipboardFormat(name), _FALSE_DWORD
             )
         except Exception as exc:  # noqa: BLE001 - pywintypes.error on odd builds
-            log.debug("Nie moge oznaczyc schowka jako %s: %s", name, exc)
+            log.debug("Cannot mark the clipboard as %s: %s", name, exc)
 
 
 def _close_quietly() -> None:
@@ -166,7 +166,7 @@ def deliver(
 
     set_clipboard_text(text, allow_history=clipboard_history)
     if not auto_paste:
-        log.info("Tekst w schowku (%d znakow), auto-paste wylaczony", len(text))
+        log.info("Text on the clipboard (%d characters), auto-paste disabled", len(text))
         return
 
     # Give the target app time to notice the clipboard update. Electron-based
@@ -174,7 +174,7 @@ def deliver(
     # if we race them.
     time.sleep(paste_delay_ms / 1000.0)
     send_paste()
-    log.info("Wklejono %d znakow", len(text))
+    log.info("Pasted %d characters", len(text))
 
     if previous is not None:
         # The paste itself is asynchronous; restoring too early makes the target
@@ -186,4 +186,4 @@ def deliver(
             # duplicate of his previous entry in Win+V.
             set_clipboard_text(previous, allow_history=clipboard_history)
         except ClipboardError as exc:
-            log.warning("Nie moge przywrocic poprzedniej zawartosci schowka: %s", exc)
+            log.warning("Cannot restore the previous clipboard contents: %s", exc)

@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover
     HAVE_PYWIN32 = False
 
 
-@unittest.skipUnless(HAVE_PYWIN32, "pywin32 niedostepny")
+@unittest.skipUnless(HAVE_PYWIN32, "pywin32 unavailable")
 class CredentialRoundTripTest(unittest.TestCase):
     def setUp(self):
         self.addCleanup(self._cleanup)
@@ -46,8 +46,8 @@ class CredentialRoundTripTest(unittest.TestCase):
 
     def test_non_ascii_survives_the_utf16_round_trip(self):
         """A wrong encoding on the read side returns mojibake, not an error."""
-        credentials.set_api_key(PROBE_PROVIDER, "klucz-ĄŻÓŁ-śćń")
-        self.assertEqual(self.read_back(), "klucz-ĄŻÓŁ-śćń")
+        credentials.set_api_key(PROBE_PROVIDER, "key-ĄŻÓŁ-śćń")
+        self.assertEqual(self.read_back(), "key-ĄŻÓŁ-śćń")
 
     def test_long_key_round_trips(self):
         key = "sk-" + "x" * 400

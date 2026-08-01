@@ -147,7 +147,7 @@ class EmptyReplyTest(unittest.TestCase):
     def test_thinking_only_reply_raises(self):
         with self.assertRaises(providers.ProviderError) as caught:
             self._complete(_Message([_Block("thinking")]))
-        self.assertIn("nie zawiera tekstu", str(caught.exception))
+        self.assertIn("contains no text", str(caught.exception))
 
     def test_error_names_the_blocks_that_did_arrive(self):
         with self.assertRaises(providers.ProviderError) as caught:
@@ -163,8 +163,8 @@ class EmptyReplyTest(unittest.TestCase):
             self._complete(_Message([]))
 
     def test_real_text_alongside_thinking_is_returned(self):
-        message = _Message([_Block("thinking", "rozwazam"), _Block("text", "Gotowe.")])
-        self.assertEqual(self._complete(message), "Gotowe.")
+        message = _Message([_Block("thinking", "considering"), _Block("text", "Done.")])
+        self.assertEqual(self._complete(message), "Done.")
 
     def test_literal_empty_sentinel_still_gets_through(self):
         """EMPTY is a real answer; only an absent one is an error."""
@@ -181,7 +181,7 @@ class ThinkingDisabledTest(unittest.TestCase):
     def _request_for(self, model, provider_key="deepseek"):
         provider = MessagesApiProvider(registry.spec(provider_key))
         client = mock.Mock()
-        client.messages.create.return_value = _Message([_Block("text", "Gotowe.")])
+        client.messages.create.return_value = _Message([_Block("text", "Done.")])
         env = {"DEEPSEEK_API_KEY": "sk-ds-x", "ANTHROPIC_API_KEY": "sk-ant-x"}
         with mock.patch.dict("os.environ", env):
             with mock.patch("anthropic.Anthropic", return_value=client):
@@ -208,7 +208,7 @@ class CliEmptyOutputTest(unittest.TestCase):
     def test_empty_stdout_raises_instead_of_reading_as_empty_sentinel(self):
         with self.assertRaises(providers.ProviderError) as caught:
             self._run("   \n ")
-        self.assertIn("pusta odpowiedz", str(caught.exception))
+        self.assertIn("empty reply", str(caught.exception))
 
     def test_stderr_is_quoted_when_there_is_one(self):
         with self.assertRaises(providers.ProviderError) as caught:
@@ -216,7 +216,7 @@ class CliEmptyOutputTest(unittest.TestCase):
         self.assertIn("usage limit reached", str(caught.exception))
 
     def test_normal_output_is_returned_stripped(self):
-        self.assertEqual(self._run("  Gotowe.\n"), "Gotowe.")
+        self.assertEqual(self._run("  Done.\n"), "Done.")
 
 
 class ProviderSwitchTest(unittest.TestCase):

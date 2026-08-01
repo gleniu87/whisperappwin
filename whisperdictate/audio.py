@@ -62,9 +62,9 @@ class DeviceInfo:
     is_default: bool
 
     def __str__(self) -> str:
-        marker = " (domyslne)" if self.is_default else ""
+        marker = " (default)" if self.is_default else ""
         return (
-            f"[{self.index}] {self.name} - {self.channels} kanal(y) "
+            f"[{self.index}] {self.name} - {self.channels} channel(s) "
             f"@ {self.default_samplerate:.0f} Hz [{self.host_api}]{marker}"
         )
 
@@ -79,9 +79,9 @@ def refresh_devices() -> None:
     try:
         sd._terminate()
         sd._initialize()
-        log.debug("Lista urzadzen audio odswiezona")
+        log.debug("Audio device list refreshed")
     except Exception as exc:  # noqa: BLE001 - PortAudio internals
-        log.warning("Nie moge odswiezyc listy urzadzen audio: %s", exc)
+        log.warning("Cannot refresh the audio device list: %s", exc)
 
 
 def list_input_devices(*, all_host_apis: bool = False) -> list[DeviceInfo]:
@@ -94,7 +94,7 @@ def list_input_devices(*, all_host_apis: bool = False) -> list[DeviceInfo]:
         host_apis = sd.query_hostapis()
         default_index = sd.default.device[0]
     except Exception as exc:  # noqa: BLE001 - PortAudio not initialised
-        log.warning("Nie moge odczytac listy urzadzen audio: %s", exc)
+        log.warning("Cannot read the audio device list: %s", exc)
         return []
 
     devices = []
@@ -221,7 +221,7 @@ class Recorder:
 
     def start(self) -> None:
         if self._stream is not None:
-            log.debug("start() na juz nagrywajacym rekorderze - ignoruje")
+            log.debug("start() on an already-recording recorder - ignoring it")
             return
 
         with self._lock:
@@ -233,7 +233,7 @@ class Recorder:
 
         self._stream, self._capture_rate, self._capture_channels = self._open_stream()
         log.debug(
-            "Nagrywanie wystartowalo @ %d Hz, %d kanal(y)", self._capture_rate, self._capture_channels
+            "Recording started @ %d Hz, %d channel(s)", self._capture_rate, self._capture_channels
         )
 
     def _resolve_device(self) -> DeviceInfo | None:
@@ -254,7 +254,7 @@ class Recorder:
             log.warning("%s", self.fallback_note)
             return None
 
-        log.debug("Mikrofon %r -> %s", spec, device)
+        log.debug("Microphone %r -> %s", spec, device)
         return device
 
     def _resolve_device_index(self) -> int | None:
@@ -269,7 +269,7 @@ class Recorder:
                 stream.stop()
                 stream.close()
             except sd.PortAudioError as exc:  # pragma: no cover - device yanked mid-recording
-                log.warning("Blad przy zamykaniu strumienia audio: %s", exc)
+                log.warning("Error while closing the audio stream: %s", exc)
 
         with self._lock:
             chunks, self._chunks = self._chunks, []
@@ -277,9 +277,9 @@ class Recorder:
         if not chunks:
             return None
         if self._overflowed:
-            log.warning("Przepelnienie bufora audio - czesc probek moze byc zgubiona")
+            log.warning("Audio buffer overflow - some samples may have been lost")
         if self._truncated:
-            log.warning("Nagranie przycięte do limitu %.0f s", self._max_seconds)
+            log.warning("Recording truncated at the %.0f s limit", self._max_seconds)
 
         audio = np.concatenate(chunks).astype(np.float32, copy=False)
         return _resample(audio, self._capture_rate, TARGET_RATE)
@@ -321,7 +321,7 @@ class Recorder:
         for attempt in range(_RETRY_PASSES):
             if attempt:
                 time.sleep(_RETRY_DELAY_S)
-                log.info("Zaden format nie przeszedl - ponawiam (proba %d)", attempt + 1)
+                log.info("No format worked - retrying (attempt %d)", attempt + 1)
 
             for index, samplerate, channels in candidates:
                 stream = self._try_open(index, samplerate, channels, failures)
@@ -330,7 +330,7 @@ class Recorder:
 
                 if cached != (index, samplerate, channels):
                     log.info(
-                        "Format audio: urzadzenie %s, %d Hz, %d kanal(y)", index, samplerate, channels
+                        "Audio format: device %s, %d Hz, %d channel(s)", index, samplerate, channels
                     )
                     self._format_cache[cache_key] = (index, samplerate, channels)
                 return stream, samplerate, channels
@@ -384,7 +384,7 @@ class Recorder:
             info = sd.query_devices(device if device is not None else sd.default.device[0], "input")
             return int(info["default_samplerate"]), int(info["max_input_channels"])
         except Exception as exc:  # noqa: BLE001 - PortAudio raises several types here
-            log.warning("Nie moge odczytac parametrow urzadzenia %s (%s) - zakladam 48 kHz stereo", device, exc)
+            log.warning("Cannot read the parameters of device %s (%s) - assuming 48 kHz stereo", device, exc)
             return 48_000, 2
 
     def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001 - sounddevice API

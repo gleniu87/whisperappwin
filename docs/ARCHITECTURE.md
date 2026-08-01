@@ -1,97 +1,98 @@
-# Architektura
+# Architecture
 
-## Skąd ten projekt
+## Where this project comes from
 
-Oryginał (`jacek-gajewski-ice/whisper-app`) to natywna aplikacja macOS: Swift 6,
-SwiftUI `MenuBarExtra`, AVAudioRecorder, Carbon event tapy na hotkey, `NSPasteboard`,
-uprawnienia TCC, podpisywanie `codesign`. Żadna z tych warstw nie istnieje na
-Windows, więc port polega na odtworzeniu **zachowania**, nie kodu.
+The original (`jacek-gajewski-ice/whisper-app`) is a native macOS application:
+Swift 6, SwiftUI `MenuBarExtra`, AVAudioRecorder, Carbon event taps for the hotkey,
+`NSPasteboard`, TCC permissions, `codesign` signing. None of those layers exists on
+Windows, so the port reproduces the **behaviour**, not the code.
 
-Mapowanie warstw:
+Layer mapping:
 
-| Oryginał (macOS) | Ta wersja (Windows) |
+| Original (macOS) | This version (Windows) |
 |---|---|
-| whisper.cpp (`whisper-cli`, proces potomny) | faster-whisper / CTranslate2 (w procesie) |
-| AVAudioRecorder → plik WAV | sounddevice → tablica NumPy w pamięci |
-| Carbon event tap na lewy ⌥ | pynput `Listener` na prawy Alt |
-| SwiftUI `MenuBarExtra` | pystray (ikona zasobnika) |
-| Panel SwiftUI | Tk `Toplevel` (overlay nagrywania) |
-| `NSPasteboard` + ⌘V | `win32clipboard` + Ctrl+V przez pynput |
-| `UserDefaults` | TOML w `%APPDATA%` |
-| TCC (uprawnienia) | brak odpowiednika — Windows nie pyta o mikrofon per-aplikacja dla desktopu |
+| whisper.cpp (`whisper-cli`, child process) | faster-whisper / CTranslate2 (in-process) |
+| AVAudioRecorder → WAV file | sounddevice → NumPy array in memory |
+| Carbon event tap on left ⌥ | pynput `Listener` on right Alt |
+| SwiftUI `MenuBarExtra` | pystray (tray icon) |
+| SwiftUI panel | Tk `Toplevel` (recording overlay) |
+| `NSPasteboard` + ⌘V | `win32clipboard` + Ctrl+V via pynput |
+| `UserDefaults` | TOML in `%APPDATA%` |
+| TCC (permissions) | no equivalent — Windows does not ask for per-application microphone access for desktop apps |
 
-Zamiana whisper.cpp na faster-whisper nie jest kosmetyczna: znika proces potomny,
-znika zapis WAV na dysk, a na GPU NVIDIA CTranslate2 z `float16` jest szybszy niż
-whisper.cpp z CUDA. Kosztem jest cięższa instalacja (biblioteki cuDNN).
+Swapping whisper.cpp for faster-whisper is not cosmetic: the child process goes
+away, the WAV write to disk goes away, and on an NVIDIA GPU CTranslate2 with
+`float16` is faster than whisper.cpp with CUDA. The cost is a heavier install (cuDNN
+libraries).
 
-## Model wątków
+## Threading model
 
-To najłatwiejsza rzecz do zepsucia w tej aplikacji, więc jest opisana wprost.
-
-```
-main            pętla zdarzeń Tk — overlay, sprawdzanie sygnału zamknięcia
-pystray         własna pętla komunikatów Win32 (run_detached)
-pynput          globalny hook klawiatury (low-level)
-worker-*        ładowanie modelu i transkrypcja, po jednym wątku na zadanie
-```
-
-Reguły, których pilnuje kod:
-
-- **Callbacki hotkeya muszą wracać natychmiast.** Działają na wątku globalnego
-  hooka klawiatury; zablokowanie go zatrzymuje obsługę klawiszy w całym systemie.
-  Dlatego `DictationController.on_stop()` oddaje audio wątkowi roboczemu i wraca.
-- **Tk wolno dotykać tylko z wątku głównego.** `Overlay.set_state()` wrzuca zdarzenie
-  do `queue.Queue`, opróżnianej cyklicznym `after()`.
-- **Zamknięcie idzie przez `threading.Event`.** Menu tray działa na swoim wątku i nie
-  może wywołać `root.quit()`; ustawia zdarzenie, które wątek główny odpytuje.
-- **Wyjątek w wątku roboczym nie może zniknąć po cichu.** `_tracked()` opakowuje
-  każdy wątek, loguje traceback i przestawia stan na `ERROR`.
-
-## Przepływ jednego dyktowania
+This is the easiest thing to get wrong in this application, so it is spelled out.
 
 ```
-prawy Alt wciśnięty
-  └─ timer 300 ms ──(inny klawisz?)──> anulowane, to była kombinacja AltGr
-       └─ próg minął
-            └─ Recorder.start()          strumień PortAudio, mono f32 @ 16 kHz
-                 ├─ overlay: czerwona kropka + miernik poziomu
-                 └─ prawy Alt puszczony
+main            Tk event loop — overlay, polling for the quit signal
+pystray         its own Win32 message loop (run_detached)
+pynput          global keyboard hook (low-level)
+worker-*        model loading and transcription, one thread per job
+```
+
+Rules the code enforces:
+
+- **Hotkey callbacks must return immediately.** They run on the global keyboard
+  hook's thread; blocking it stops key handling system-wide. That is why
+  `DictationController.on_stop()` hands the audio to a worker thread and returns.
+- **Tk may only be touched from the main thread.** `Overlay.set_state()` pushes an
+  event onto a `queue.Queue`, drained by a recurring `after()`.
+- **Shutdown goes through a `threading.Event`.** The tray menu runs on its own
+  thread and cannot call `root.quit()`; it sets an event the main thread polls.
+- **An exception on a worker thread must not vanish silently.** `_tracked()` wraps
+  every thread, logs the traceback and switches the state to `ERROR`.
+
+## The flow of one dictation
+
+```
+right Alt pressed
+  └─ 300 ms timer ──(another key?)──> cancelled, that was an AltGr combination
+       └─ threshold passed
+            └─ Recorder.start()          PortAudio stream, mono f32 @ 16 kHz
+                 ├─ overlay: red dot + level meter
+                 └─ right Alt released
                       └─ Recorder.stop() → np.ndarray
-                           ├─ < min_seconds? odrzuć
-                           └─ wątek roboczy:
-                                ├─ Transcriber.transcribe()   VAD → CT2 → tekst
-                                ├─ postprocess.process()      czyszczenie + zamiany
-                                ├─ History.append()           JSONL (przed wklejeniem!)
-                                └─ output.deliver()           schowek + Ctrl+V
+                           ├─ < min_seconds? discard
+                           └─ worker thread:
+                                ├─ Transcriber.transcribe()   VAD → CT2 → text
+                                ├─ postprocess.process()      clean-up + replacements
+                                ├─ History.append()           JSONL (before the paste!)
+                                └─ output.deliver()           clipboard + Ctrl+V
 ```
 
-Kolejność „historia przed wklejeniem" jest celowa: jeśli schowek jest zablokowany
-przez inną aplikację, transkrypcja jest już zapisana i da się ją odzyskać.
+The "history before the paste" ordering is deliberate: if the clipboard is locked by
+another application, the transcript is already recorded and can be recovered.
 
-## Moduły
+## Modules
 
-| Plik | Odpowiedzialność |
+| File | Responsibility |
 |---|---|
-| `config.py` | TOML z dostępem `get("sekcja.klucz")`, walidacja, atomowy zapis |
-| `i18n.py` | katalog tekstów UI (pl/en), wybór języka, detekcja z Windows |
-| `paths.py` | lokalizacje w `%APPDATA%` / `%LOCALAPPDATA%` |
-| `runtime_cuda.py` | rejestracja DLL-i z pakietów `nvidia-*-cu12` przed importem ctranslate2 |
-| `audio.py` | wykrywanie i wybór mikrofonu, przechwytywanie, resampling, miernik poziomu |
-| `transcriber.py` | leniwe ładowanie modelu, CUDA z fallbackiem na CPU |
-| `hotkey.py` | detekcja gestu prawy Alt, próg przytrzymania, ochrona AltGr |
-| `output.py` | schowek, zwalnianie zablokowanych modyfikatorów, Ctrl+V |
-| `postprocess.py` | czyszczenie tekstu, filtr halucynacji, słownik zamian |
-| `history.py` | dopisywanie do JSONL, przycinanie |
-| `sounds.py` | nieblokujące sygnały dźwiękowe |
-| `enhance/` | czyszczenie transkrypcji przez LLM: prompty, providerzy, filtr wyjścia, klucz API |
-| `controller.py` | maszyna stanów, orkiestracja, protokół `UiSink` |
-| `ui/tray.py` | ikona zasobnika, menu, powiadomienia |
-| `ui/overlay.py` | pływający wskaźnik nagrywania |
-| `__main__.py` | CLI, logowanie, pojedyncza instancja, montaż zależności |
+| `config.py` | TOML with `get("section.key")` access, validation, atomic save |
+| `i18n.py` | catalogue of UI text (pl/en), language selection, detection from Windows |
+| `paths.py` | locations under `%APPDATA%` / `%LOCALAPPDATA%` |
+| `runtime_cuda.py` | registering DLLs from the `nvidia-*-cu12` packages before ctranslate2 is imported |
+| `audio.py` | microphone detection and selection, capture, resampling, level meter |
+| `transcriber.py` | lazy model loading, CUDA with a CPU fallback |
+| `hotkey.py` | right-Alt gesture detection, hold threshold, AltGr protection |
+| `output.py` | clipboard, releasing stuck modifiers, Ctrl+V |
+| `postprocess.py` | text clean-up, hallucination filter, replacement table |
+| `history.py` | appending to JSONL, trimming |
+| `sounds.py` | non-blocking audio cues |
+| `enhance/` | LLM transcript clean-up: prompts, providers, output filter, API key |
+| `controller.py` | state machine, orchestration, the `UiSink` protocol |
+| `ui/tray.py` | tray icon, menu, notifications |
+| `ui/overlay.py` | floating recording indicator |
+| `__main__.py` | CLI, logging, single instance, dependency assembly |
 
-## Granica rdzeń / UI
+## The core / UI boundary
 
-`DictationController` nie importuje niczego z `ui/`. Zna wyłącznie protokół:
+`DictationController` imports nothing from `ui/`. It knows only the protocol:
 
 ```python
 class UiSink(Protocol):
@@ -99,151 +100,161 @@ class UiSink(Protocol):
     def notify(self, message: str, *, error: bool = False) -> None: ...
 ```
 
-Tray i overlay to dwie niezależne implementacje, rejestrowane przez `add_ui()`.
-Dołożenie okna z dashboardem (którego nie ma w tej wersji, a jest w oryginale)
-sprowadza się do trzeciej implementacji tego protokołu — bez zmian w logice.
+The tray and the overlay are two independent implementations, registered via
+`add_ui()`. Adding a dashboard window (absent from this version, present in the
+original) comes down to a third implementation of that protocol — with no changes to
+the logic.
 
-## Warstwa językowa
+## The language layer
 
-`i18n.py` trzyma **cały tekst, który widzi użytkownik** — menu tray, dymek
-nagrywania, dialogi, plus te komunikaty błędów, które trafiają do dymka
-(`AudioError`, `TranscriptionError`, `ClipboardError`). Nie importuje niczego
-z pakietu, więc `config`, `audio` i `enhance/` mogą z niego czytać bez cyklu.
+`i18n.py` holds **all the text the user sees** — the tray menu, the recording
+overlay, the dialogs, plus those error messages that reach a balloon (`AudioError`,
+`TranscriptionError`, `ClipboardError`). It imports nothing from the package, so
+`config`, `audio` and `enhance/` can read from it without a cycle.
 
-**Log i CLI zostają po polsku i to jest granica postawiona świadomie.** Czyta je
-ten, kto diagnozuje, a nie ten, kto dyktuje; trzymanie ich poza katalogiem
-utrzymuje go w rozmiarze jednego ekranu prawdziwego tekstu UI.
+**The log and the CLI are written in English directly, not through the catalogue,
+and that is the documented scope of `i18n`: the GUI only.** They are developer-facing
+— read by whoever is diagnosing a problem, and pasted into bug reports and diffs —
+so a second language for them would double the catalogue's size with no user ever
+reading it. Log and CLI strings must not be moved into `i18n`.
 
-Aktywny język to stan modułu (`i18n.use()`), nie obiekt przekazywany w dół.
-Alternatywą byłoby przeciąganie translatora przez kontroler do traya, overlaya
-i każdego dialogu, a użytkownik na proces jest dokładnie jeden.
+A few values the CLI prints do come from the catalogue, because the GUI needs them
+too (`credentials.describe_source()`, `registry.hosting()`). So `main()` forces
+`i18n.use("en")` for the one-shot commands and honours `ui.language` only for
+`run_app()` — otherwise `--check` mixes translated sentences into English output.
 
-Dwa języki to **dwa niezależne ustawienia**: `ui.language` (interfejs) i
-`transcription.language` (co słyszy Whisper). Dyktowanie po angielsku z polskim
-menu jest normalną kombinacją, a `transcription.language` przyjmuje dodatkowo
-`auto`, które dla menu nie ma sensu.
+The active language is module state (`i18n.use()`), not an object passed down. The
+alternative would be threading a translator through the controller into the tray, the
+overlay and every dialog, and there is exactly one user per process.
 
-Tekst nadający się do odczytu maszynowego został wypchnięty z danych do katalogu:
-`ProviderSpec` trzyma już tylko nazwę produktu („DeepSeek API"), a podpowiedź
-(„~10x tańszy") i jurysdykcję (`registry.hosting()`) bierze z `i18n`.
-Podobnie `credentials.source()` zwraca teraz `env` / `store` / `none`, a nie
-zdanie po polsku — na przetłumaczonym zdaniu nie da się rozgałęzić kodu.
+The two languages are **two independent settings**: `ui.language` (the interface) and
+`transcription.language` (what Whisper hears). Dictating in English through a Polish
+menu is a normal combination, and `transcription.language` additionally accepts
+`auto`, which makes no sense for a menu.
 
-## Decyzje, które wyglądają dziwnie i są celowe
+Machine-readable text has been pushed out of the data and into the catalogue:
+`ProviderSpec` now holds only the product name ("DeepSeek API"), while the hint
+("~10x cheaper") and the jurisdiction (`registry.hosting()`) come from `i18n`.
+Likewise `credentials.source()` now returns `env` / `store` / `none` rather than a
+sentence — you cannot branch code on a translated sentence.
 
-**Resampling liniowy zamiast polyphase z scipy.**
-Front-end Whispera to spektrogram melowy przy 16 kHz, a energia mowy leży dobrze
-poniżej częstotliwości Nyquista. Aliasing, który usunąłby porządny filtr, jest dla
-modelu niesłyszalny. Ścieżka fallbacku i tak jest rzadka — WASAPI w trybie
-współdzielonym zwykle sam podaje 16 kHz.
+## Decisions that look odd and are deliberate
+
+**Linear resampling instead of scipy's polyphase.**
+Whisper's front-end is a mel spectrogram at 16 kHz, and speech energy sits well
+below the Nyquist frequency. The aliasing a proper filter would remove is inaudible
+to the model. The fallback path is rare anyway — WASAPI in shared mode usually
+reports 16 kHz itself.
 
 **`condition_on_previous_text=False`.**
-Każde dyktowanie jest niezależne. Przenoszenie kontekstu między wypowiedziami to
-główna przyczyna pętli powtórzeń w Whisperze.
+Every dictation is independent. Carrying context across utterances is the main cause
+of repetition loops in Whisper.
 
-**Modyfikatory nie anulują gestu hotkeya.**
-Windows przy każdym AltGr wysyła syntetyczny lewy Ctrl. Gdyby modyfikatory liczyły
-się jako „inny klawisz", hotkey na prawym Alcie nie wystrzeliłby ani razu.
+**Modifiers do not cancel the hotkey gesture.**
+Windows sends a synthetic left Ctrl with every AltGr. If modifiers counted as
+"another key", the right-Alt hotkey would never fire.
 
-**Przywracany jest tylko tekst ze schowka.**
-`CF_UNICODETEXT` i nic więcej. Jeśli przed dyktowaniem w schowku był obrazek albo
-lista plików, przepada. Zachowanie pełnej zawartości wymagałoby przechwycenia
-wszystkich formatów łącznie z opóźnionym renderowaniem — nieproporcjonalnie dużo
-kodu jak na ten zysk. Alternatywa dla wymagających: `output.restore_clipboard = false`.
+**Only text is restored to the clipboard.**
+`CF_UNICODETEXT` and nothing else. If the clipboard held an image or a file list
+before the dictation, it is lost. Preserving the full contents would mean capturing
+every format including delayed rendering — disproportionately much code for the
+gain. The alternative for the demanding: `output.restore_clipboard = false`.
 
-**Menu mikrofonów pokazuje tylko WASAPI.**
-Windows wystawia ten sam mikrofon przez cztery host API PortAudio. Na maszynie
-testowej dawało to 26 pozycji na 3 fizyczne urządzenia. MME ucina nazwy na 31
-znakach (`Mikrofon (Virtual Desktop Audio` — bez nawiasu zamykającego), WDM-KS
-rozbija urządzenie wielokanałowe na wpisy per para kanałów, a WASAPI daje jeden
-czysty wpis z prawdziwą częstotliwością. Rozwiązywanie nazwy też przeszukuje
-najpierw WASAPI, żeby zapisana nazwa nie trafiła po cichu na gorszy wpis MME
-tego samego mikrofonu. `--list-devices --all` pokazuje pełną listę.
+**The microphone menu shows WASAPI only.**
+Windows exposes the same microphone through four PortAudio host APIs. On the test
+machine that came to 26 entries for 3 physical devices. MME truncates names at 31
+characters (`Mikrofon (Virtual Desktop Audio` — note the missing closing bracket),
+WDM-KS splits a multi-channel device into per-channel-pair entries, and WASAPI gives
+one clean entry with the true sample rate. Name resolution also searches WASAPI
+first, so a saved name does not quietly land on the inferior MME entry for the same
+microphone. `--list-devices --all` shows the full list.
 
-**Urządzenie zapisywane po nazwie, nie po indeksie.**
-Indeksy PortAudio przesuwają się przy każdej zmianie sprzętu. Indeks zapisany
-dziś jutro wskazuje inny mikrofon — cicha awaria, która wygląda jak zepsuta
-aplikacja.
+**The device is saved by name, not by index.**
+PortAudio indices shift whenever the hardware changes. An index saved today points at
+a different microphone tomorrow — a silent failure that looks like a broken
+application.
 
-**`refresh_devices()` restartuje PortAudio.**
-Lista urządzeń jest migawką z momentu inicjalizacji, więc mikrofon podłączony
-później jest niewidoczny. Restart jest bezpieczny tylko bez otwartego strumienia,
-dlatego woła się go z menu (blokowane w trakcie nagrywania) i raz przy nieudanym
-rozwiązaniu nazwy — czyli dokładnie w scenariuszu „odłączyłem kamerkę".
+**`refresh_devices()` restarts PortAudio.**
+The device list is a snapshot from initialisation time, so a microphone plugged in
+later is invisible. The restart is only safe with no stream open, which is why it is
+called from the menu (blocked while recording) and once on a failed name resolution
+— that is, in exactly the "I unplugged the webcam" scenario.
 
-**Akcje menu pystray to domknięcia, nigdy `lambda x=wartosc:`.**
-pystray wybiera sposób wywołania akcji na podstawie `__code__.co_argcount`: 0 =
-wywołaj bez argumentów, 1 = podaj `Icon`. Argument domyślny **wlicza się** do tej
-liczby, więc idiom late-bindingu `lambda n=device.name: ...` dostaje obiekt `Icon`
-zamiast nazwy. Predykaty `checked` są odporne (pystray woła je z jednym
-argumentem, więc drugi bierze wartość domyślną), ale akcje nie. Pilnuje tego
-`tests/test_tray_menu.py`.
+**pystray menu actions are closures, never `lambda x=value:`.**
+pystray decides how to invoke an action from `__code__.co_argcount`: 0 = call with no
+arguments, 1 = pass the `Icon`. A default argument **counts** towards that number, so
+the late-binding idiom `lambda n=device.name: ...` receives an `Icon` object instead
+of the name. `checked` predicates are immune (pystray calls them with one argument, so
+the second takes its default), but actions are not. `tests/test_tray_menu.py` guards
+this.
 
-**Czyszczenie tekstu jest fail-soft i nigdy nie rzuca.**
-`EnhancementService.enhance()` zwraca `None` przy każdej awarii — brak klucza,
-limit API, timeout, błąd providera, a nawet nieoczekiwany wyjątek. `None` znaczy
-„wklej surowy transkrypt". Pusty string znaczy co innego: sentinel `EMPTY`
-z promptu, czyli „to był sam szum, nie wklejaj nic". To rozróżnienie jest
-celowe — awaria i cisza wyglądają identycznie, jeśli oba zwracają pustkę.
+**Text clean-up is fail-soft and never raises.**
+`EnhancementService.enhance()` returns `None` on any failure — a missing key, an API
+limit, a timeout, a provider error, even an unexpected exception. `None` means "paste
+the raw transcript". An empty string means something else: the `EMPTY` sentinel from
+the prompt, i.e. "that was pure noise, paste nothing". The distinction is deliberate —
+a failure and silence look identical if both return emptiness.
 
-**Transkrypcja jest opakowana w `<TRANSCRIPT>`.**
-Bez tego dyktowanie, które przypadkiem jest pytaniem („czy możesz to sprawdzić"),
-czyta się jak polecenie i model na nie odpowiada. Tag zamienia je w dane.
+**The transcript is wrapped in `<TRANSCRIPT>`.**
+Without it a dictation that happens to be a question ("czy możesz to sprawdzić")
+reads as an instruction and the model answers it. The tag turns it into data.
 
-**Bezpiecznik na odpowiedź zamiast czyszczenia.**
-Gdy wynik jest ponad trzykrotnie dłuższy od wejścia (i dłuższy niż 400 znaków),
-jest odrzucany. Oczyszczony tekst ma długość zbliżoną do oryginału; wynik
-wielokrotnie dłuższy to inny rodzaj tekstu — model odpowiedział zamiast oczyścić.
+**A safeguard against answering instead of cleaning.**
+When the result is more than three times longer than the input (and longer than 400
+characters), it is rejected. Cleaned text is close in length to the original; a
+result several times longer is a different kind of text — the model answered instead
+of cleaning.
 
-**Prompt zawiera polskie słownictwo przerywników.**
-Prompt napisany po angielsku wycina „um" i zostawia „no więc yyy" nietknięte.
-Lista polskich wypełniaczy i zwrotów autopoprawki to funkcjonalny rdzeń, nie
-tłumaczenie.
+**The prompt contains Polish filler vocabulary.**
+A prompt written in English cuts "um" and leaves "no więc yyy" untouched. The list of
+Polish fillers and self-correction phrases is the functional core, not a translation.
 
-**Rejestr providerów jest osobnym, bezimportowym modułem.**
-`enhance/registry.py` nie importuje niczego z pakietu, więc czytają go zarówno
-`config.py`, jak i `enhance/providers.py`, bez cyklu. Trzyma to, co odróżnia
-providerów: `base_url`, zmienną środowiskową klucza, listę modeli i jurysdykcję.
+**The provider registry is a separate, import-free module.**
+`enhance/registry.py` imports nothing from the package, so both `config.py` and
+`enhance/providers.py` can read it without a cycle. It holds what distinguishes the
+providers: `base_url`, the key's environment variable, the model list and the
+jurisdiction.
 
-**DeepSeek nie ma własnego klienta.**
-Wystawia endpoint zgodny z protokołem Anthropic Messages, więc `MessagesApiProvider`
-obsługuje oba — różni je wyłącznie `base_url` i klucz. Ignoruje `anthropic-beta`,
-`anthropic-version`, `top_k` i `cache_control`; nie wysyłamy żadnego z nich. Jego
-cache promptu jest automatyczny po stronie serwera, więc ignorowany `cache_control`
-nie kosztuje nas trafień w cache.
+**DeepSeek has no client of its own.**
+It exposes an endpoint compatible with the Anthropic Messages protocol, so
+`MessagesApiProvider` serves both — only `base_url` and the key differ. It ignores
+`anthropic-beta`, `anthropic-version`, `top_k` and `cache_control`; we send none of
+them. Its prompt cache is automatic server-side, so the ignored `cache_control` costs
+us no cache hits.
 
-**Zmiana providera przestawia model.**
-Nazwy modeli nie przenoszą się między providerami. Zostawienie `claude-haiku-4-5`
-po przejściu na DeepSeeka trafiłoby w cichy fallback ich API na `deepseek-v4-flash`
-— działa, ale konfiguracja kłamie o tym, co faktycznie działa.
+**Changing the provider resets the model.**
+Model names do not carry across providers. Leaving `claude-haiku-4-5` after switching
+to DeepSeek would hit their API's silent fallback to `deepseek-v4-flash` — it works,
+but the configuration then lies about what is actually running.
 
-**Menu modeli używa predykatu `visible`, nie przebudowy.**
-Menu pystray jest niezmienne po zbudowaniu, ale `visible` jest wyliczane przy
-każdym wyświetleniu. Modele wszystkich providerów są zadeklarowane z góry i
-ukrywane, gdy ich provider nie jest wybrany.
+**The model menu uses a `visible` predicate, not a rebuild.**
+A pystray menu is immutable once built, but `visible` is evaluated on every display.
+Every provider's models are declared up front and hidden when their provider is not
+selected.
 
-**Klucze API w Menedżerze poświadczeń, nie w configu — osobny wpis na providera.**
-`config.toml` to zwykły tekst w profilu roamingowym, nadpisywany przy każdym
-kliknięciu w tray. Menedżer poświadczeń szyfruje per użytkownik i trzyma klucz
-poza wszystkim, co da się przypadkiem udostępnić. `Persist` ustawione na
-`LOCAL_MACHINE`, żeby klucz nie wędrował z profilem domenowym.
+**API keys in the Credential Manager, not the config — one entry per provider.**
+`config.toml` is plain text in a roaming profile, rewritten on every tray click. The
+Credential Manager encrypts per user and keeps the key out of anything that can be
+shared by accident. `Persist` is set to `LOCAL_MACHINE` so the key does not roam with
+a domain profile.
 
-**Dialogi Tk odpalane przez `MainThreadDispatcher`.**
-Tray ma własną pętlę komunikatów Win32, a obiektów Tk wolno dotykać tylko
-z wątku, który je utworzył. Akcja menu wrzuca wywołanie do kolejki opróżnianej
-przez `after()` na wątku Tk.
+**Tk dialogs are launched through `MainThreadDispatcher`.**
+The tray has its own Win32 message loop, and Tk objects may only be touched from the
+thread that created them. A menu action pushes the call onto a queue drained by
+`after()` on the Tk thread.
 
-**Model ładowany z wyprzedzeniem w tle.**
-Konstrukcja `WhisperModel` to sekundy. Ładowanie przy pierwszym dyktowaniu
-oznaczałoby, że pierwsze użycie po starcie jest zauważalnie wolniejsze.
+**The model is preloaded in the background.**
+Constructing `WhisperModel` takes seconds. Loading it on the first dictation would
+make the first use after startup noticeably slower.
 
-## Czego brakuje względem oryginału
+## What is missing relative to the original
 
-- Poprawianie transkrypcji przez LLM (`Enhancement/` w oryginale) — cała warstwa
-  providerów (Anthropic, Ollama, Claude Code) i promptów.
-- Okno dashboardu z ośmioma zakładkami.
-- Menedżer modeli z paskiem postępu pobierania.
-- Statystyki użycia (oryginał liczy słowa, czas, oszczędzony czas pisania).
+- The OpenAI, OpenRouter and Ollama clean-up providers. Three are implemented here:
+  Anthropic API, DeepSeek API and Claude Code CLI — the last two are additions the
+  original does not have.
+- The dashboard window with eight tabs.
+- A model manager with a download progress bar.
+- Usage statistics (the original counts words, time, and typing time saved).
 
-Historia jest zapisywana w formacie, który wystarcza do zbudowania statystyk
-później — każdy wpis ma `audio_seconds`, `elapsed_seconds`, `model`, `language`.
+The history is recorded in a format sufficient to build statistics later — every
+entry carries `audio_seconds`, `elapsed_seconds`, `model`, `language`.

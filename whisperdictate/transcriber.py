@@ -73,7 +73,7 @@ class Transcriber:
     @property
     def description(self) -> str:
         if not self.is_loaded:
-            return f"{self.model_name} (niezaladowany)"
+            return f"{self.model_name} (not loaded)"
         return f"{self.model_name} @ {self._active_device}/{self._active_compute}"
 
     # -- loading --------------------------------------------------------
@@ -105,7 +105,7 @@ class Transcriber:
                     raise TranscriptionError(
                         t("error.model_load", model=self.model_name, error=exc)
                     ) from exc
-                log.warning("Model nie wystartowal na CUDA (%s) - przechodze na CPU", exc)
+                log.warning("Model failed to start on CUDA (%s) - falling back to CPU", exc)
                 device, compute = "cpu", self._compute_for("cpu")
                 try:
                     self._model = self._construct(WhisperModel, device, compute)
@@ -116,7 +116,7 @@ class Transcriber:
 
             self._active_device, self._active_compute = device, compute
             log.info(
-                "Model %s zaladowany na %s/%s w %.1f s",
+                "Model %s loaded on %s/%s in %.1f s",
                 self.model_name, device, compute, time.perf_counter() - started,
             )
 
@@ -132,9 +132,9 @@ class Transcriber:
         device = self.device_pref
         if device == "auto":
             device = "cuda" if _cuda_available() else "cpu"
-            log.info("Wykryto backend: %s", device)
+            log.info("Detected backend: %s", device)
         elif device == "cuda" and not _cuda_available():
-            log.warning("Wymuszono device=cuda, ale CTranslate2 nie widzi GPU - sprobuje mimo to")
+            log.warning("device=cuda was forced, but CTranslate2 sees no GPU - trying anyway")
         return device, self._compute_for(device)
 
     def _compute_for(self, device: str) -> str:
@@ -186,7 +186,7 @@ class Transcriber:
             elapsed_seconds=time.perf_counter() - started,
         )
         log.info(
-            "Transkrypcja: %.1f s audio w %.2f s (%.1fx realtime), %d znakow",
+            "Transcription: %.1f s of audio in %.2f s (%.1fx realtime), %d characters",
             result.audio_seconds, result.elapsed_seconds, result.speedup, len(result.text),
         )
         return result
@@ -201,5 +201,5 @@ def _cuda_available() -> bool:
     try:
         return ctranslate2.get_cuda_device_count() > 0
     except Exception as exc:  # noqa: BLE001 - missing DLLs surface as RuntimeError/OSError
-        log.info("Sprawdzenie CUDA nieudane (%s) - zakladam CPU", exc)
+        log.info("CUDA probe failed (%s) - assuming CPU", exc)
         return False

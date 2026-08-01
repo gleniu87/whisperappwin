@@ -26,7 +26,7 @@ if HAVE_PYWIN32:
     from whisperdictate.output import deliver, get_clipboard_text, set_clipboard_text
 
 
-@unittest.skipUnless(HAVE_PYWIN32, "pywin32 niedostepny")
+@unittest.skipUnless(HAVE_PYWIN32, "pywin32 unavailable")
 class ClipboardHistoryExclusionTest(unittest.TestCase):
     def setUp(self):
         self.previous = get_clipboard_text()
@@ -66,8 +66,8 @@ class ClipboardHistoryExclusionTest(unittest.TestCase):
     def test_an_excluded_write_is_still_readable(self):
         """The whole point of choosing this over typing the text out: Ctrl+V
         still has something to paste."""
-        set_clipboard_text("zażółć gęślą jaźń", allow_history=False)
-        self.assertEqual(get_clipboard_text(), "zażółć gęślą jaźń")
+        set_clipboard_text("non-ascii ąćęłńóśźż", allow_history=False)
+        self.assertEqual(get_clipboard_text(), "non-ascii ąćęłńóśźż")
 
     def test_the_opt_out_value_is_a_four_byte_zero(self):
         """Windows reads a DWORD. A one-byte 0, or a 4-byte 1, would silently
@@ -89,8 +89,8 @@ class ClipboardHistoryExclusionTest(unittest.TestCase):
         self.assertEqual(self.excluded(), (False, False))
 
     def test_deliver_still_puts_the_text_where_ctrl_v_will_find_it(self):
-        deliver("tekst do wklejenia", auto_paste=False)
-        self.assertEqual(get_clipboard_text(), "tekst do wklejenia")
+        deliver("text to paste", auto_paste=False)
+        self.assertEqual(get_clipboard_text(), "text to paste")
 
     def test_empty_text_touches_nothing(self):
         set_clipboard_text("wartosc uzytkownika")
@@ -98,7 +98,7 @@ class ClipboardHistoryExclusionTest(unittest.TestCase):
         self.assertEqual(get_clipboard_text(), "wartosc uzytkownika")
 
 
-@unittest.skipUnless(HAVE_PYWIN32, "pywin32 niedostepny")
+@unittest.skipUnless(HAVE_PYWIN32, "pywin32 unavailable")
 class ClipboardTextTest(unittest.TestCase):
     def setUp(self):
         self.previous = get_clipboard_text()
@@ -107,8 +107,8 @@ class ClipboardTextTest(unittest.TestCase):
         )
 
     def test_round_trips_polish_text(self):
-        set_clipboard_text("Zażółć gęślą jaźń — ĄĆĘŁŃÓŚŹŻ")
-        self.assertEqual(get_clipboard_text(), "Zażółć gęślą jaźń — ĄĆĘŁŃÓŚŹŻ")
+        set_clipboard_text("Unicode round-trip — ĄĆĘŁŃÓŚŹŻ ąćęłńóśźż")
+        self.assertEqual(get_clipboard_text(), "Unicode round-trip — ĄĆĘŁŃÓŚŹŻ ąćęłńóśźż")
 
     def test_non_text_clipboard_reads_as_none(self):
         """A clipboard holding no CF_UNICODETEXT must not raise; the caller uses

@@ -41,4 +41,4 @@ def _play_tones(tones: tuple[tuple[int, int], ...]) -> None:
         for frequency, duration in tones:
             winsound.Beep(frequency, duration)
     except RuntimeError as exc:  # no audio output device
-        log.debug("Nie moge odtworzyc dzwieku: %s", exc)
+        log.debug("Cannot play sound: %s", exc)

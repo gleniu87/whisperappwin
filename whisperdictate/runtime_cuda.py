@@ -47,17 +47,17 @@ def enable_cuda_dlls() -> list[Path]:
             try:
                 os.add_dll_directory(str(candidate))
             except OSError as exc:  # pragma: no cover - defensive
-                log.debug("Nie moge dodac %s do sciezki DLL: %s", candidate, exc)
+                log.debug("Cannot add %s to the DLL search path: %s", candidate, exc)
                 continue
             # PATH too: some loaders bypass the per-process directory list.
             os.environ["PATH"] = f"{candidate}{os.pathsep}{os.environ.get('PATH', '')}"
             _added.append(candidate)
-            log.debug("Dodano do sciezki DLL: %s", candidate)
+            log.debug("Added to the DLL search path: %s", candidate)
 
     if _added:
-        log.info("Biblioteki CUDA znalezione w %d katalogach", len(_added))
+        log.info("CUDA libraries found in %d directory(ies)", len(_added))
     else:
-        log.info("Brak pakietow nvidia-*-cu12 - CUDA zadziala tylko z systemowym CUDA Toolkit")
+        log.info("No nvidia-*-cu12 packages - CUDA will only work with a system CUDA Toolkit")
     return list(_added)
 
 

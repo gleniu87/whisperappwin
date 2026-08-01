@@ -70,20 +70,20 @@ class CopyLastTranscriptionTest(unittest.TestCase):
     # -- the happy path --------------------------------------------------
 
     def test_copies_the_newest_transcript(self):
-        self.history.append(text="pierwsze dyktowanie")
-        self.history.append(text="drugie, zażółć gęślą jaźń")
+        self.history.append(text="first dictation")
+        self.history.append(text="second, with ĄĆĘŁŃÓŚŹŻ")
         self.controller.copy_last_transcription()
-        self.assertEqual(self.written, [("drugie, zażółć gęślą jaźń", True)])
+        self.assertEqual(self.written, [("second, with ĄĆĘŁŃÓŚŹŻ", True)])
 
     def test_copies_the_cleaned_text_not_the_raw_one(self):
         """`text` is what was pasted; `raw_text` is the transcript before clean-up.
         Handing back the raw version would undo the clean-up silently."""
-        self.history.append(text="Sprawdź parser.", raw_text="no wiec yyy sprawdz parser")
+        self.history.append(text="Check the parser.", raw_text="so um check the parser")
         self.controller.copy_last_transcription()
-        self.assertEqual(self.written, [("Sprawdź parser.", True)])
+        self.assertEqual(self.written, [("Check the parser.", True)])
 
     def test_the_user_is_told_how_much_was_copied(self):
-        self.history.append(text="dwanascie zn")
+        self.history.append(text="twelve chars")  # exactly 12, matched below
         self.controller.copy_last_transcription()
         message, error = self.ui.messages[-1]
         self.assertFalse(error)
@@ -92,22 +92,22 @@ class CopyLastTranscriptionTest(unittest.TestCase):
     def test_a_deliberate_copy_is_allowed_into_the_clipboard_history(self):
         """The opposite of a dictation being pasted. He asked for this one, so it
         belongs in Win+V - see tests/test_output.py for the other direction."""
-        self.history.append(text="cokolwiek")
+        self.history.append(text="anything")
         self.controller.copy_last_transcription()
-        self.assertTrue(self.written[-1][1], "allow_history musi byc True")
+        self.assertTrue(self.written[-1][1], "allow_history must be True")
 
     # -- nothing to give back --------------------------------------------
 
     def test_an_empty_history_touches_nothing_and_says_so(self):
         self.controller.copy_last_transcription()
         self.assertEqual(self.written, [])
-        self.assertTrue(self.ui.messages[-1][1], "powinno byc oznaczone jako blad")
+        self.assertTrue(self.ui.messages[-1][1], "should be flagged as an error")
 
     def test_a_switched_off_history_refuses_rather_than_serving_a_stale_entry(self):
         """append() no-ops while disabled, so the newest line is from whenever
         recording was last on. Offering that as "the last transcription" would be
         a wrong answer dressed as a right one."""
-        self.history.append(text="z czasow, gdy historia dzialala")
+        self.history.append(text="from back when history was on")
         self.history.enabled = False
         self.controller.copy_last_transcription()
         self.assertEqual(self.written, [])
@@ -129,16 +129,16 @@ class CopyLastTranscriptionTest(unittest.TestCase):
     def test_a_busy_clipboard_is_reported_not_raised(self):
         from whisperdictate.output import ClipboardError
 
-        self.history.append(text="cokolwiek")
+        self.history.append(text="anything")
         with mock.patch(
             "whisperdictate.output.set_clipboard_text",
-            side_effect=ClipboardError("schowek zajety"),
+            side_effect=ClipboardError("clipboard busy"),
         ):
             self.controller.copy_last_transcription()  # must not raise
         self.assertTrue(self.ui.messages[-1][1])
 
 
-@unittest.skipUnless(HAVE_PYWIN32, "pywin32 niedostepny")
+@unittest.skipUnless(HAVE_PYWIN32, "pywin32 unavailable")
 class CopyReachesTheRealClipboardTest(unittest.TestCase):
     """One end-to-end pass, against the real clipboard, without mocks."""
 
@@ -164,14 +164,14 @@ class CopyReachesTheRealClipboardTest(unittest.TestCase):
     def test_the_text_really_lands_where_ctrl_v_will_find_it(self):
         from whisperdictate.output import get_clipboard_text
 
-        self.history.append(text="Zażółć gęślą jaźń — ĄĆĘŁŃÓŚŹŻ")
+        self.history.append(text="Unicode round-trip — ĄĆĘŁŃÓŚŹŻ ąćęłńóśźż")
         self.controller.copy_last_transcription()
-        self.assertEqual(get_clipboard_text(), "Zażółć gęślą jaźń — ĄĆĘŁŃÓŚŹŻ")
+        self.assertEqual(get_clipboard_text(), "Unicode round-trip — ĄĆĘŁŃÓŚŹŻ ąćęłńóśźż")
 
     def test_and_is_visible_to_the_clipboard_history(self):
         import win32clipboard
 
-        self.history.append(text="swiadome kopiowanie")
+        self.history.append(text="deliberate copy")
         self.controller.copy_last_transcription()
         excluded = win32clipboard.RegisterClipboardFormat("CanIncludeInClipboardHistory")
         win32clipboard.OpenClipboard()

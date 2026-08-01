@@ -129,17 +129,17 @@ class TrayMenuTest(unittest.TestCase):
         for item in self.tray._icon.menu:
             if str(item.text) == title:
                 return list(item.submenu)
-        raise AssertionError(f"brak podmenu {title!r}")
+        raise AssertionError(f"no submenu {title!r}")
 
     def nested_top(self, prefix):
         """A top-level submenu whose label carries its current selection."""
         for item in self.tray._icon.menu:
             if str(item.text).startswith(prefix):
                 return list(item.submenu)
-        raise AssertionError(f"brak pozycji {prefix!r} w menu glownym")
+        raise AssertionError(f"no item {prefix!r} in the main menu")
 
     def nested(self, title, prefix):
-        """A submenu inside 'Czyszczenie tekstu', found by its label prefix.
+        """A submenu inside the text clean-up menu, found by its label prefix.
 
         Those labels carry the current selection ("Model: deepseek-v4-flash"),
         so they are matched on prefix rather than equality.
@@ -151,7 +151,7 @@ class TrayMenuTest(unittest.TestCase):
         for item in self.submenu(title):
             if str(item.text).startswith(prefix):
                 return list(item.submenu)
-        raise AssertionError(f"brak pozycji {prefix!r} w {title!r}")
+        raise AssertionError(f"no item {prefix!r} in {title!r}")
 
     # -- the arity trap -------------------------------------------------
 
@@ -521,7 +521,7 @@ class SuggestionMenuTest(unittest.TestCase):
         for item in self.tray._icon.menu:
             if str(item.text) == "Czyszczenie tekstu":
                 return list(item.submenu)
-        raise AssertionError("brak podmenu")
+        raise AssertionError("no submenu")
 
     def test_counter_is_hidden_when_there_is_nothing_to_review(self):
         labels = [str(i.text) for i in self.cleanup_items()]

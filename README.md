@@ -1,591 +1,612 @@
 # WhisperDictate for Windows
 
-> **Port na Windows aplikacji [WhisperDictate](https://github.com/jacek-gajewski-ice/whisper-app)
-> autorstwa Jacka Gajewskiego.** Oryginał działa wyłącznie na macOS. To jest
-> odtworzenie jego zachowania na Windows — pomysł, projekt i decyzje produktowe
-> pochodzą stamtąd.
+> **A Windows port of [WhisperDictate](https://github.com/jacek-gajewski-ice/whisper-app)
+> by Jacek Gajewski.** The original runs on macOS only. This is a reconstruction of
+> its behaviour on Windows — the idea, the design and the product decisions come
+> from there.
 
-Lokalne dyktowanie *hold-to-talk*: przytrzymujesz klawisz, mówisz, puszczasz — tekst
-wkleja się tam, gdzie masz kursor. Wszystko liczy się na Twoim komputerze, nic nie
-wychodzi do chmury.
+Local *hold-to-talk* dictation: hold a key, speak, let go — the text is pasted
+wherever your cursor is. Everything runs on your own machine; nothing goes to the
+cloud.
 
-## Stosunek do oryginału
+## Relationship to the original
 
-**To nie jest fork ani tłumaczenie kodu — to niezależna implementacja tego samego
-zachowania.** Nie dało się inaczej: oryginał to Swift + SwiftUI + AVFoundation +
-Core Audio, czyli frameworki, których na Windows po prostu nie ma. Żadna linijka
-kodu nie została przeniesiona, bo nie było czego przenosić.
+**This is not a fork and not a code translation — it is an independent
+implementation of the same behaviour.** There was no other option: the original is
+Swift + SwiftUI + AVFoundation + Core Audio, frameworks that simply do not exist on
+Windows. Not a single line of code was carried over, because there was nothing to
+carry.
 
-Co pochodzi z oryginału:
+What comes from the original:
 
-- **Cały pomysł na produkt** — hold-to-talk, praca lokalna, ikona w zasobniku
-  zamiast okna, wklejanie do aktywnej aplikacji.
-- **Decyzje produktowe**, łącznie z tymi nieoczywistymi: czyszczenie tekstu przez
-  LLM **domyślnie wyłączone** (`Helpers.swift`: `enhanceTranscription = false`),
-  sentinel `EMPTY` na ciszę, fail-soft do surowej transkrypcji.
-- **Konstrukcja promptu czyszczącego** — `Enhancement/CustomPrompt.swift`, które
-  z kolei kredytuje [FreeFlow](https://github.com/zachlatta/freeflow)
-  i [VoiceInk](https://github.com/Beingpax/VoiceInk).
+- **The whole product idea** — hold-to-talk, local processing, a tray icon instead
+  of a window, pasting into the active application.
+- **Product decisions**, including the non-obvious ones: LLM text clean-up
+  **disabled by default** (`Helpers.swift`: `enhanceTranscription = false`), the
+  `EMPTY` sentinel for silence, fail-soft to the raw transcript.
+- **The construction of the clean-up prompt** — `Enhancement/CustomPrompt.swift`,
+  which in turn credits [FreeFlow](https://github.com/zachlatta/freeflow)
+  and [VoiceInk](https://github.com/Beingpax/VoiceInk).
 
-Co jest tutejsze, bo musiało być:
+What is local to this port, because it had to be:
 
-| | oryginał (macOS) | tutaj (Windows) |
+| | original (macOS) | here (Windows) |
 |---|---|---|
-| Silnik | whisper.cpp | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) / CTranslate2 |
-| Audio | AVFoundation / Core Audio | PortAudio przez `sounddevice`, z fallbackiem WASAPI → DirectSound → MME |
+| Engine | whisper.cpp | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) / CTranslate2 |
+| Audio | AVFoundation / Core Audio | PortAudio via `sounddevice`, falling back WASAPI → DirectSound → MME |
 | UI | SwiftUI | pystray + Tk |
-| Hotkey | Carbon / NSEvent | pynput, z obsługą kolizji AltGr na polskim układzie |
-| Klucze API | Keychain | Menedżer poświadczeń Windows |
+| Hotkey | Carbon / NSEvent | pynput, handling the AltGr clash on the Polish layout |
+| API keys | Keychain | Windows Credential Manager |
 
-Doszło też kilka rzeczy, których oryginał nie ma, bo wynikają z Windows albo
-z pracy po polsku: wybór mikrofonu po nazwie (indeksy PortAudio się przesuwają),
-polskie słownictwo przerywników w prompcie, słownik nazw własnych zasilający
-Whispera i model czyszczący, oraz providerzy DeepSeek i Claude Code CLI.
+A few things were added that the original does not have, because Windows or
+working in Polish demanded them: microphone selection by name (PortAudio indices
+shift), Polish filler vocabulary in the prompt, a proper-noun list feeding both
+Whisper and the clean-up model, and the DeepSeek and Claude Code CLI providers.
 
-Na GPU NVIDIA faster-whisper jest szybszy niż whisper.cpp, a na CPU porównywalny.
+On an NVIDIA GPU faster-whisper is faster than whisper.cpp; on CPU it is
+comparable.
 
-## Wymagania
+## Requirements
 
 | | |
 |---|---|
-| System | Windows 10 1809+ / Windows 11 |
-| Python | 3.10 lub nowszy |
-| GPU (opcjonalnie) | NVIDIA z ≥6 GB VRAM dla `large-v3-turbo` |
-| Dysk | ~1 GB na zależności + ~1.6 GB na model |
+| OS | Windows 10 1809+ / Windows 11 |
+| Python | 3.10 or newer |
+| GPU (optional) | NVIDIA with ≥6 GB VRAM for `large-v3-turbo` |
+| Disk | ~1 GB for dependencies + ~1.6 GB for the model |
 
-Bez GPU też działa — na nowoczesnym CPU `large-v3-turbo` transkrybuje mniej więcej
-w tempie mowy, a mniejsze modele (`small`, `medium`) znacznie szybciej.
+It works without a GPU too — on a modern CPU `large-v3-turbo` transcribes at
+roughly the pace of speech, and the smaller models (`small`, `medium`) are much
+faster.
 
-## Instalacja
+## Installation
 
 ```powershell
-git clone <adres-repo> C:\claude_projects\whisperappwin
+git clone <repo-address> C:\claude_projects\whisperappwin
 cd C:\claude_projects\whisperappwin
 .\setup.ps1
 ```
 
-`setup.ps1` tworzy lokalny `.venv`, instaluje zależności, wykrywa kartę NVIDIA i
-dociąga do niej biblioteki cuBLAS/cuDNN, a na koniec uruchamia diagnostykę.
-Wymuszenie trybu CPU: `.\setup.ps1 -Cpu`.
+`setup.ps1` creates a local `.venv`, installs the dependencies, detects an NVIDIA
+card and pulls the matching cuBLAS/cuDNN libraries, then runs the diagnostics.
+Force CPU mode with `.\setup.ps1 -Cpu`.
 
-Pierwsze uruchomienie pobiera model (~1.6 GB) z Hugging Face do
-`%LOCALAPPDATA%\WhisperDictateWin\models`. Kolejne startują z dysku.
+The first run downloads the model (~1.6 GB) from Hugging Face into
+`%LOCALAPPDATA%\WhisperDictateWin\models`. Later runs start from disk.
 
-## Użycie
+## Usage
 
 ```powershell
-.\run.ps1              # z konsolą (widzisz logi)
-.\run.ps1 -Hidden      # w tle, tylko ikona w zasobniku
+.\run.ps1              # with a console (you see the logs)
+.\run.ps1 -Hidden      # in the background, tray icon only
 ```
 
-**Przytrzymaj prawy Alt, mów, puść.** Tekst pojawi się w aktywnym oknie.
+**Hold right Ctrl, speak, let go.** The text appears in the active window.
 
-Ikona w zasobniku pokazuje stan kolorem — szary (gotowy), czerwony (nagrywanie),
-niebieski (transkrypcja), żółty (ładowanie modelu), ciemnoszary (wyłączone).
-Z jej menu przełączysz język dyktowania, język aplikacji, model i **mikrofon**
-oraz otworzysz konfigurację, historię lub log.
+The tray icon shows the state by colour — grey (ready), red (recording), blue
+(transcribing), yellow (loading the model), dark grey (disabled). From its menu you
+can switch the dictation language, the app language, the model and the
+**microphone**, and open the config, the history or the log.
 
-Na górze menu jest **Włącz dyktowanie** — główny wyłącznik. Odhaczony: hotkey
-przestaje działać, trwające nagranie leci do kosza, ale model zostaje w pamięci
-i ikona zostaje w zasobniku. Na czas spotkania to jedno kliknięcie, nie restart.
+At the top of the menu is **Enable dictation** — the master switch. Unchecked: the
+hotkey stops working and any recording in progress is dropped, but the model stays
+in memory and the icon stays in the tray. For the duration of a meeting that is one
+click, not a restart.
 
-Menu nie ma linii statusu. Miała ją i była wygodna, dopóki nie włączyło się kilku
-rzeczy — Windows rozciąga menu do najdłuższej pozycji, więc jedno zdanie ze stanem,
-modelem i providerem robiło z całego menu pas przez pół ekranu. Stan jest w kolorze
-ikony i w tooltipie (najedź), a wybory są w podpisach podmenu: *Model: large-v3-turbo*,
-*Hotkey: Prawy Ctrl*, *Provider: DeepSeek API*.
+The menu has no status line. It had one and it was convenient, right up until
+several features were switched on — Windows stretches a menu to its longest entry,
+so a single sentence carrying the state, the model and the provider turned the whole
+menu into a band across half the screen. The state lives in the icon colour and the
+tooltip (hover), and the choices live in the submenu labels: *Model:
+large-v3-turbo*, *Hotkey: Right Ctrl*, *Provider: DeepSeek API*.
 
-### Język interfejsu
+### Interface language
 
-Menu tray, dymek nagrywania i okna dialogowe mówią **po polsku albo po angielsku**;
-przełącznik jest w menu tray → *Język aplikacji*. Zmiana działa od razu, bez
-restartu, i zapisuje się w `ui.language`.
+The tray menu, the recording overlay and the dialogs speak **Polish or English**;
+the switch is in the tray menu → *App language*. The change takes effect
+immediately, without a restart, and is saved to `ui.language`.
 
-**Pierwsze uruchomienie bierze język z Windows** — z języka *wyświetlania* systemu,
-nie z regionu, bo to on odpowiada na pytanie „w jakim języku ten człowiek czyta
-oprogramowanie". Jeśli to ani polski, ani angielski, aplikacja wybiera angielski.
-Wynik zapisuje się jako konkretne `"pl"` albo `"en"`, więc widać, co wybrała.
+**The first run takes the language from Windows** — from the system *display*
+language, not the region, because that is the one answering "what language does
+this person read software in". If it is neither Polish nor English, the app picks
+English. The result is written down as a concrete `"pl"` or `"en"`, so you can see
+what it chose.
 
-To **osobne ustawienie od języka dyktowania** (`transcription.language`) i tak ma
-być: dyktowanie po angielsku z polskim menu jest normalną kombinacją. Dlatego oba
-przełączniki stoją w menu obok siebie — *Język dyktowania* i *Język aplikacji*
-wyjaśniają się nawzajem, a każdy z osobna czytałby się jako „to ustawienie języka".
+This is a **separate setting from the dictation language**
+(`transcription.language`) and it is meant to be: dictating in English through a
+Polish menu is a perfectly normal combination. That is why both switches sit next
+to each other in the menu — *Dictation language* and *App language* explain each
+other, whereas either one alone would read as "the language setting".
 
-Log i wyjście z linii poleceń (`-Check`, `-Benchmark`, `-Quality`) zostają po
-polsku niezależnie od tego ustawienia. Czyta je ten, kto diagnozuje, a nie ten,
-kto dyktuje.
+The log and the command-line output (`-Check`, `-Benchmark`, `-Quality`) are always
+in English, whatever this setting says. They are read by whoever is diagnosing a
+problem, not by whoever is dictating, and they end up pasted into bug reports and
+diffs.
 
-### Wybór mikrofonu
+### Choosing a microphone
 
-Menu **Mikrofon** pokazuje urządzenia WASAPI — po jednym na fizyczny sprzęt.
-Windows wystawia ten sam mikrofon przez cztery API (MME, DirectSound, WASAPI,
-WDM-KS), więc pełna lista PortAudio potrafi mieć 25 pozycji na 3 mikrofony;
-WASAPI to ta z pełnymi nazwami i prawdziwą częstotliwością próbkowania.
+The **Microphone** menu shows WASAPI devices — one per physical piece of hardware.
+Windows exposes the same microphone through four APIs (MME, DirectSound, WASAPI,
+WDM-KS), so the full PortAudio list can hold 25 entries for 3 microphones; WASAPI
+is the one with complete names and the true sample rate.
 
-Wybór zapisuje się **po nazwie, nie po indeksie** — indeksy PortAudio przesuwają
-się przy każdym podłączeniu sprzętu, więc zapisany dziś numer jutro wskazuje inne
-urządzenie.
+The choice is saved **by name, not by index** — PortAudio indices shift whenever
+hardware is plugged in, so a number saved today points at a different device
+tomorrow.
 
-Odłączenie wybranego mikrofonu (np. kamerki USB) nie psuje aplikacji: przy
-następnym dyktowaniu przeskanuje sprzęt ponownie, a jeśli urządzenia nadal nie ma
-— nagra z domyślnego systemowego i powie Ci o tym powiadomieniem. Urządzenie
-zostaje zaznaczone w menu jako *(niepodłączony)*, żeby było widać, na co aplikacja
-czeka. **Odśwież listę** wymusza ponowne wykrycie sprzętu (PortAudio buforuje listę
-przy starcie, więc świeżo podłączony mikrofon inaczej się nie pojawi).
+Unplugging the selected microphone (a USB webcam, say) does not break the app: on
+the next dictation it re-scans the hardware, and if the device is still missing it
+records from the system default and tells you so with a notification. The device
+stays marked in the menu as *(disconnected)*, so you can see what the app is
+waiting for. **Refresh list** forces hardware re-detection (PortAudio caches the
+list at startup, so a freshly plugged-in microphone will not appear otherwise).
 
-### Schowek i dymek nagrywania
+### The clipboard and the recording overlay
 
-Wklejanie idzie przez schowek i `Ctrl+V` — tak jak w oryginale (`NSPasteboard` +
-`⌘V`). Dwie rzeczy da się z tym zrobić:
+Pasting goes through the clipboard and `Ctrl+V` — as in the original
+(`NSPasteboard` + `⌘V`). There are two things you can do about it:
 
-- **`output.restore_clipboard`** (domyślnie `true`) — po wklejeniu wraca to, co
-  miałeś w schowku wcześniej. Ustaw `false`, jeśli chcesz, żeby transkrypcja
-  została w schowku do ponownego wklejenia.
-- **`output.clipboard_history`** (domyślnie `false`) — czy dyktowanie ma trafiać
-  do **historii schowka Windows (Win+V)** i do schowka w chmurze.
+- **`output.restore_clipboard`** (default `true`) — after the paste, whatever you
+  had on the clipboard comes back. Set it to `false` if you want the transcript to
+  stay on the clipboard for another paste.
+- **`output.clipboard_history`** (default `false`) — whether a dictation may reach
+  the **Windows clipboard history (Win+V)** and the cloud clipboard.
 
-Drugie ustawienie istnieje, bo pierwsze nie wystarczało: przywrócenie poprzedniej
-zawartości **nie usuwa wpisu z historii**. Windows zapisuje każdą zmianę schowka
-w momencie, w którym się dzieje, więc Win+V zbierał każde dyktowanie mimo
-`restore_clipboard = true`. Domyślnie oznaczamy więc dane formatami
-`CanIncludeInClipboardHistory` i `CanUploadToCloudClipboard` — tak samo, jak robią
-to menedżery haseł. Przywracana zawartość jest oznaczana tak samo, żeby nie
-dorzucać do Win+V duplikatu Twojego własnego wpisu przy każdym dyktowaniu.
+The second setting exists because the first was not enough: restoring the previous
+contents **does not remove the history entry**. Windows records every clipboard
+change at the moment it happens, so Win+V was collecting every dictation despite
+`restore_clipboard = true`. By default the data is therefore marked with the
+`CanIncludeInClipboardHistory` and `CanUploadToCloudClipboard` formats — exactly
+what password managers do. The restored contents are marked the same way, so as not
+to add a duplicate of your own entry to Win+V on every dictation.
 
-Świadomie **nie** wpisujemy tekstu znak po znaku (`SendInput`) zamiast wklejać:
-nowa linia w tekście to wtedy Enter, czyli wysłana w połowie wiadomość w każdym
-komunikatorze, a 900 znaków wpisuje się wyraźnie dłużej niż wkleja.
+Typing the text out character by character (`SendInput`) instead of pasting is a
+deliberate **no**: a newline in the text then becomes Enter, which is a
+half-finished message sent in every chat app, and 900 characters take noticeably
+longer to type than to paste.
 
-#### Gdy dyktowanie trafiło w nic
+#### When a dictation landed nowhere
 
-`Ctrl+V` do okna bez pola tekstowego nic nie wkleja, a `restore_clipboard` zabiera
-potem transkrypcję ze schowka — dymek zdąży pokazać „N znaków", jakby się udało.
-Tekst nie ginie: jest w historii. Menu tray → **Skopiuj ostatnią transkrypcję**
-wkłada go z powrotem do schowka (tym razem **z** historią Win+V, bo to już
-świadome kopiowanie, nie automat).
+`Ctrl+V` into a window with no text field pastes nothing, and `restore_clipboard`
+then takes the transcript off the clipboard — the overlay has time to report "N
+characters", as if it had worked. The text is not lost: it is in the history. Tray
+menu → **Copy last transcription** puts it back on the clipboard (this time **with**
+Win+V history, because that is a deliberate copy, not an automatic one).
 
-Pozycja jest ukryta, gdy `history.enabled = false` — bez zapisu nie ma czego
-podać. Ostrzeżenia *przed* wklejeniem świadomie nie ma: sprawdzenie „czy jest
-sfokusowane pole tekstowe" jest niepewne dokładnie w Electronie (Teams, VS Code,
-przeglądarka), gdzie całe okno to jeden HWND i zwykle nie ma karetki, więc taki
-guard sypałby fałszywymi alarmami w najczęściej używanych aplikacjach.
+The entry is hidden when `history.enabled = false` — with nothing recorded there is
+nothing to hand back. There is deliberately no warning *before* the paste: checking
+"is a text field focused" is unreliable in exactly Electron (Teams, VS Code, the
+browser), where the whole window is one HWND and usually has no caret, so such a
+guard would throw false alarms in the most frequently used applications.
 
-**Dymek nagrywania pojawia się na monitorze aktywnego okna**, nie na głównym.
-Tk zna tylko jeden ekran (`winfo_screenwidth()` to monitor główny, a jego początek
-to zawsze 0,0), więc pozycję liczymy z Win32: `GetForegroundWindow` →
-`MonitorFromWindow` → `rcWork` tego monitora. `rcWork`, nie `rcMonitor`, żeby ominąć
-pasek zadań akurat na tym ekranie. Pozycja jest przeliczana przy każdym pokazaniu
-dymka, a nie w trakcie — okno nie goni kursora po ekranach w środku nagrania.
+**The recording overlay appears on the monitor holding the active window**, not on
+the primary one. Tk knows only one screen (`winfo_screenwidth()` is the primary
+monitor, and its origin is always 0,0), so the position is computed from Win32:
+`GetForegroundWindow` → `MonitorFromWindow` → that monitor's `rcWork`. `rcWork`, not
+`rcMonitor`, so it clears the taskbar on that particular screen. The position is
+recomputed every time the overlay is shown, not while it is up — the window does not
+chase the cursor across screens mid-recording.
 
-### Klawisz dyktowania a polskie znaki
+### The dictation key and Polish characters
 
-Domyślnie **prawy Ctrl**. Zmienisz w menu tray → *Hotkey*: prawy/lewy Ctrl,
-prawy/lewy Alt, Scroll Lock, Pause. W konfiguracji (`hotkey.key`) przejdą też
-`f1`–`f20`. Zmiana działa od razu, bez restartu.
+**Right Ctrl** by default. Change it in the tray menu → *Hotkey*: right/left Ctrl,
+right/left Alt, Scroll Lock, Pause. In the config (`hotkey.key`) `f1`–`f20` work
+too. The change takes effect immediately, without a restart.
 
-**Prawego Alta lepiej nie używać na polskim układzie**, i to jest jedyny powód,
-dla którego domyślnym klawiszem nie jest on: na układzie *Polski (programisty)*
-prawy Alt **to** AltGr — klawisz, którym piszesz `ą ę ó ś ł ż ź ć ń`. Trzy
-mechanizmy łagodzą kolizję:
+**Right Alt is best avoided on a Polish layout**, and that is the only reason it is
+not the default key: on the *Polish (programmers)* layout right Alt **is** AltGr —
+the key you use to type `ą ę ó ś ł ż ź ć ń`. Three mechanisms soften the clash:
 
-1. **Nic nie jest przechwytywane.** Hook tylko obserwuje klawiaturę; AltGr dociera
-   do aplikacji nietknięty, niezależnie od tego, czy WhisperDictate działa.
-2. **Próg przytrzymania (300 ms).** `AltGr+a` to naciśnięcie poniżej 100 ms i nigdy
-   nie przekroczy progu. Dopiero świadome przytrzymanie startuje nagrywanie.
-3. **Anulowanie na inny klawisz.** Naciśnięcie litery przy trzymanym AltGr przerywa
-   gest — to była kombinacja znakowa, nie dyktowanie.
+1. **Nothing is intercepted.** The hook only observes the keyboard; AltGr reaches
+   the application untouched, whether or not WhisperDictate is running.
+2. **The hold threshold (300 ms).** `AltGr+a` is a press under 100 ms and will never
+   cross the threshold. Only a deliberate hold starts recording.
+3. **Cancel on another key.** Pressing a letter while AltGr is held aborts the
+   gesture — that was a character combination, not dictation.
 
-Klawisze modyfikujące są z punktu 3 wyłączone celowo: Windows przy każdym AltGr
-wysyła dodatkowo syntetyczny lewy Ctrl, więc gdyby modyfikatory anulowały gest,
-hotkey nie zadziałałby ani razu.
+Modifier keys are excluded from point 3 on purpose: Windows sends a synthetic left
+Ctrl alongside every AltGr, so if modifiers cancelled the gesture the hotkey would
+never fire at all.
 
-To wystarcza na *większość* naciśnięć, ale nie na wszystkie — dłuższe zawahanie
-przy `ą` potrafi przekroczyć próg i włączyć nagrywanie. Przy klawiszu, który
-naciskasz kilkadziesiąt razy na akapit, „prawie zawsze dobrze" jest za mało.
-Stąd prawy Ctrl jako domyślny; opcja `alt_r` została, bo na układzie *Polski
-(214)* i na klawiaturach bez AltGr problem nie występuje.
+That is enough for *most* presses, but not all — a longer hesitation over `ą` can
+cross the threshold and start a recording. For a key you press dozens of times per
+paragraph, "nearly always right" is not enough. Hence right Ctrl as the default;
+the `alt_r` option stayed, because on the *Polish (214)* layout and on keyboards
+without AltGr the problem does not arise.
 
-**Jeśli aktualizujesz starszą instalację**, w Twoim `config.toml` nadal siedzi
-`key = "alt_r"` — nowa domyślna wartość dotyczy tylko świeżych konfiguracji.
-Przełącz w menu tray.
+**If you are upgrading an older installation**, your `config.toml` still holds
+`key = "alt_r"` — the new default only applies to fresh configs. Switch it from the
+tray menu.
 
-### Nazwy własne, które Whisper przekręca
+### Proper nouns Whisper garbles
 
-Whisper nie zna nazw, których nie ma powodu się spodziewać: „DeepSeek" wraca jako
-`Dipsick`, `dipsyka`, `Deepsika`. Model czyszczący zwykle tego nie naprawi — nie
-ma się czego uchwycić, a zgadywanie byłoby halucynacją.
+Whisper does not know names it has no reason to expect: "DeepSeek" comes back as
+`Dipsick`, `dipsyka`, `Deepsika`. The clean-up model usually cannot repair that —
+there is nothing to anchor on, and guessing would be hallucination.
 
-Słownik ma **dwie części, które się łączą**:
+The vocabulary has **two halves that are merged**:
 
-| | gdzie | co tam trzymać |
+| | where | what to keep there |
 |---|---|---|
-| wspólna | [`vocabulary.txt`](vocabulary.txt) w repo, **wersjonowana** | nazwy techniczne i publiczne — narzędzia, biblioteki, modele |
-| prywatna | `transcription.vocabulary` w `%APPDATA%`, **poza gitem** | nazwy klientów, projektów i osób |
+| shared | [`vocabulary.txt`](vocabulary.txt) in the repo, **version-controlled** | technical and public names — tools, libraries, models |
+| private | `transcription.vocabulary` in `%APPDATA%`, **outside git** | client, project and personal names |
 
-Podział jest celowy: wspólną bazę techniczną warto wersjonować i mieć na każdej
-maszynie, a nazw z pracy nie chcesz wypchnąć na GitHuba jednym `git push`.
-`config.toml` jest w `.gitignore` od pierwszego commita.
+The split is deliberate: a shared technical base is worth version-controlling and
+having on every machine, whereas names from work are not something you want to push
+to GitHub with one `git push`. `config.toml` has been in `.gitignore` since the
+first commit.
 
-Prywatną część edytujesz z menu tray → *Czyszczenie tekstu* → **Nazwy własne...**:
-wpisujesz **jedną** nazwę, Enter, i ląduje na liście pod spodem. Pole się czyści,
-kursor w nim zostaje, więc kolejną dopisujesz od razu. Żeby coś usunąć — zaznacz na
-liście i *Usuń zaznaczoną*. Niczego nie trzeba rozdzielać przecinkami ręcznie.
+You edit the private half from the tray menu → *Text clean-up* → **Proper
+nouns...**: type **one** name, press Enter, and it lands in the list below. The
+field clears itself and keeps the cursor, so you can add the next one straight away.
+To remove something, select it in the list and choose *Remove selected*. Nothing has
+to be comma-separated by hand.
 
-Okno pokazuje **tylko część prywatną**, bo tylko ta jest edytowalna z traya; pod
-listą jest licznik nazw ze wspólnego pliku. Jeśli w priming Whispera widzisz nazwę,
-której nie ma na liście w oknie — pochodzi z [`vocabulary.txt`](vocabulary.txt)
-i tam się ją zmienia, zwykłym edytorem (plik jest w repo, więc zmiana to commit).
+The window shows **only the private half**, because only that half is editable from
+the tray; below the list is a count of the names from the shared file. If you see a
+name in Whisper's priming that is not in the window's list, it comes from
+[`vocabulary.txt`](vocabulary.txt) and is changed there, in an ordinary editor (the
+file is in the repo, so a change is a commit).
 
-Format pliku wspólnego: po przecinku albo po jednej w linii, `#` zaczyna komentarz,
-nazwy wieloczłonowe dozwolone.
+Format of the shared file: comma-separated or one per line, `#` starts a comment,
+multi-word names allowed.
 
 ```
 DeepSeek, Claude Code, Anthropic, Kubernetes, Terraform
 ```
 
-Nazwy zapisuj w **formie podstawowej** (`Anthropic`, nie `Anthropica`) — odmianą
-zajmuje się model. Aplikacja tego pilnuje: dopisanie `Anthropica` do listy, na
-której jest już `Anthropic`, nie robi drugiego wpisu, a usunięcie `Anthropic`
-zabiera ze sobą odmienione warianty. Obie połowy słownika są scalane tą samą
-regułą, więc odmieniony wpis w części prywatnej przegrywa z formą podstawową
-z pliku wspólnego i nie trafia ani do Whispera, ani do promptu.
+Write names in their **base form** (`Anthropic`, not `Anthropica`) — the model
+handles inflection. The app enforces this: adding `Anthropica` to a list that
+already holds `Anthropic` does not create a second entry, and removing `Anthropic`
+takes its inflected variants with it. Both halves of the vocabulary are merged by
+the same rule, so an inflected entry in the private half loses to the base form
+from the shared file and reaches neither Whisper nor the prompt.
 
-Jedna lista trafia w **dwa** miejsca:
+One list goes to **two** places:
 
-- do `initial_prompt` Whispera — żeby usłyszał je poprawnie i problem nie powstał,
-- do promptu modelu czyszczącego — żeby naprawił to, co mimo wszystko przekręcił.
+- to Whisper's `initial_prompt` — so it hears them correctly and the problem never
+  arises,
+- to the clean-up model's prompt — so it repairs whatever got garbled anyway.
 
-Żadna połowa nie wystarcza sama. Priming czasem nie zadziała, a naprawa po fakcie
-zostawia przekręcony tekst w historii i nie pomaga przy wyłączonym czyszczeniu.
-Prompt zawiera jawny zakaz dopisywania nazw z listy do transkrypcji, w których nic
-ich nie przypomina — bez tego model zaczyna je wstawiać tam, gdzie ich nie było.
+Neither half is enough alone. Priming sometimes fails, and repairing after the fact
+leaves the garbled text in the history and does not help with clean-up switched off.
+The prompt carries an explicit ban on inserting names from the list into transcripts
+that contain nothing resembling them — without it the model starts putting them
+where they never were.
 
-Zmierzony efekt drugiej połowy (`deepseek-v4-flash`, ten sam tekst, po 3 przebiegi):
+Measured effect of the second half (`deepseek-v4-flash`, same text, 3 runs each):
 
-| | `DeepSeek` poprawnie | `Sonnet` poprawnie |
+| | `DeepSeek` correct | `Sonnet` correct |
 |---|---|---|
-| bez słownika | 2 / 3 | **0 / 3** |
-| ze słownikiem | 3 / 3 | **2 / 3** |
+| without the vocabulary | 2 / 3 | **0 / 3** |
+| with the vocabulary | 3 / 3 | **2 / 3** |
 
-Wpływ na priming Whispera nie został zmierzony — to udokumentowane zachowanie
-`initial_prompt`, nie pomiar na konkretnym głosie.
+The effect on Whisper's priming was not measured — that is documented
+`initial_prompt` behaviour, not a measurement on a particular voice.
 
-#### Jeden słownik na oba języki
+#### One vocabulary for both languages
 
-Dyktujesz po polsku i po angielsku z **tej samej listy**. Nazwy zapisujesz
-w **formie podstawowej** (`DeepSeek`, nie `DeepSeeka`) — model odmienia je sam
-i robi to zgodnie z językiem zdania:
+You dictate in Polish and in English from **the same list**. Names are written in
+their **base form** (`DeepSeek`, not `DeepSeeka`) — the model inflects them itself,
+and does so to match the language of the sentence:
 
-| dyktowanie | w słowniku | w wyniku |
+| dictation | in the vocabulary | in the result |
 |---|---|---|
-| „przełączmy na dipsicka" | `DeepSeek` | „przełączmy na **DeepSeeka**" |
-| „switch to dipsick" | `DeepSeek` | „switch to **DeepSeek**" |
+| "przełączmy na dipsicka" | `DeepSeek` | "przełączmy na **DeepSeeka**" |
+| "switch to dipsick" | `DeepSeek` | "switch to **DeepSeek**" |
 
-Dwa słowniki nie są potrzebne i byłyby kłopotliwe: `transcription.language`
-przyjmuje `auto`, więc przy autodetekcji nie dałoby się wybrać właściwej listy
-przed transkrypcją. Whisper i tak dostaje jeden `initial_prompt`, a nazwy własne
-brzmią zwykle tak samo w obu językach.
+Two vocabularies are not needed and would be awkward: `transcription.language`
+accepts `auto`, so under auto-detection there would be no way to pick the right list
+before transcription. Whisper gets one `initial_prompt` either way, and proper nouns
+usually sound the same in both languages.
 
-Sekcja słownika w prompcie jest po polsku i **celowo** każe odmieniać po polsku,
-mimo że dla angielskiego brzmi to bez sensu. Przepisanie jej na neutralną
-językowo zostało zmierzone i wypadło **gorzej**: polski spadł z 14/16 na 9/16
-przy odtwarzaniu `Sonnet`, a angielski i tak był 8/8 w obu wersjach — bo lock
-językowy doklejany na końcu promptu i tak nadpisuje tę instrukcję.
+The vocabulary section of the prompt is written in Polish and **deliberately**
+instructs the model to inflect in Polish, even though that reads as nonsense for
+English. Rewriting it language-neutral was measured and came out **worse**: Polish
+dropped from 14/16 to 9/16 on restoring `Sonnet`, while English was 8/8 either way —
+because the language lock appended at the end of the prompt overrides that
+instruction anyway.
 
-#### Słownik, który uzupełnia się sam
+#### A vocabulary that fills itself in
 
-Czasem model czyszczący **sam** rozpozna przekręconą nazwę z kontekstu — tak Sonnet
-zamienił `Dipsick` na `Deepseek`, nie mając żadnego słownika. Taka poprawka
-naprawia jednak tylko ten jeden tekst: Whisper się nie uczy i następnym razem
-przekręci nazwę tak samo.
+Sometimes the clean-up model recognises a garbled name from context **on its own** —
+that is how Sonnet turned `Dipsick` into `Deepseek` with no vocabulary at all. But
+such a repair only fixes that one piece of text: Whisper does not learn, and next
+time it will garble the name the same way.
 
-Aplikacja wyłapuje te momenty, porównując `raw_text` z tekstem po czyszczeniu
-w historii, i proponuje dopisanie nazwy do słownika. Wtedy zaczyna działać
-zapobiegawczo — **mocniejszy model uczy słabszego raz, a potem problem nie
-powstaje**. Za rozpoznanie płacisz jeden raz, nie przy każdym dyktowaniu.
+The app catches those moments by comparing `raw_text` with the cleaned text in the
+history, and offers to add the name to the vocabulary. From then on it works
+preventively — **the stronger model teaches the weaker one once, and after that the
+problem does not arise**. You pay for the recognition once, not on every dictation.
 
 ```powershell
-.\run.ps1 -SuggestVocabulary              # co znalazło w historii
+.\run.ps1 -SuggestVocabulary              # what it found in the history
 .\run.ps1 -AddVocabulary "DeepSeek, Sonnet"
 ```
 
-W trybie automatycznym (*Czyszczenie tekstu* → *Proponuj nazwy wlasne*, domyślnie
-włączone) po dyktowaniu pojawia się dymek, a w menu licznik *Propozycje slownika (N)...*
-— widoczny tylko wtedy, gdy jest co przeglądać. Nic nie kradnie focusu i **nic nie
-trafia do słownika bez Twojego potwierdzenia**: błędny wpis psułby wszystkie
-przyszłe dyktowania, i to u źródła. Puste pole w oknie propozycji oznacza „nie
-pytaj o to słowo ponownie".
+In automatic mode (*Text clean-up* → *Suggest proper nouns*, on by default) a
+balloon appears after a dictation, and the menu grows a *Vocabulary suggestions
+(N)...* counter — visible only when there is something to review. Nothing steals
+focus and **nothing reaches the vocabulary without your confirmation**: a wrong
+entry would spoil every future dictation, and do it at the source. An empty field in
+the suggestion window means "never ask about this word again".
 
-Filtr jest celowo ostry, bo model czyszczący zmienia mnóstwo słów. Odpadają
-różnice wyłącznie w diakrytykach i wielkości liter (`wez`→`weź`), odmiana tego
-samego rdzenia (`alta`→`Altu`), zamiany bez podobieństwa brzmienia i przeróbki
-wielu słów naraz. Zostają zamiany jedno słowo na jedno, brzmiące podobnie, gdzie
-wynik wygląda na nazwę własną. Na 22 dyktowaniach dało to 1 kandydata — trafionego.
+The filter is deliberately sharp, because the clean-up model changes a great many
+words. Out go differences only in diacritics or capitalisation (`wez`→`weź`),
+inflections of the same stem (`alta`→`Altu`), substitutions with no phonetic
+similarity, and rewrites spanning several words. What stays are one-for-one
+substitutions that sound alike and whose result looks like a proper noun. Over 22
+dictations that produced 1 candidate — a correct one.
 
-Ograniczenie, które warto znać: to nie pomoże przy nazwie, której model czyszczący
-**nigdy** nie zgadnie. Pierwsze wystąpienie czegoś zupełnie nietypowego trzeba
-wpisać ręcznie. To uzupełnienie ręcznego słownika, nie zamiennik.
+A limitation worth knowing: this does not help with a name the clean-up model will
+**never** guess. The first occurrence of something completely unusual has to be
+typed in by hand. It complements the manual vocabulary; it does not replace it.
 
-## Czyszczenie tekstu przez LLM
+## LLM text clean-up
 
-Surowa transkrypcja zawiera wszystko, co powiedziałeś — łącznie z `yyy`, `no więc`,
-`jakby`, `w sensie` i poprawkami w locie. Warstwa czyszcząca przepuszcza ją przez
-model, zanim trafi do schowka:
+A raw transcript contains everything you said — including `yyy`, `no więc`,
+`jakby`, `w sensie` and mid-sentence corrections. The clean-up layer runs it through
+a model before it reaches the clipboard:
 
 ```
-PRZED:  ...bo myślałem, że ta oryginalna aplikacja od Jacka, to ona jakby te,
+BEFORE: ...bo myślałem, że ta oryginalna aplikacja od Jacka, to ona jakby te,
         ucina takie, wiesz, że przerabia te moje słowa...
-PO:     ...bo myślałem, że oryginalna aplikacja od Jacka przerabia te moje słowa...
+AFTER:  ...bo myślałem, że oryginalna aplikacja od Jacka przerabia te moje słowa...
 ```
 
-Robi cztery rzeczy: wycina przerywniki, stosuje autopoprawki (`wyślij do Marka
-znaczy do Marcina` → `wyślij do Marcina`), poprawia interpunkcję i polskie znaki,
-a przy samej ciszy zwraca sentinel `EMPTY` i nic nie wkleja. Nie rusza
-identyfikatorów, ścieżek, flag CLI ani `camelCase`.
+It does four things: cuts fillers, applies spoken self-corrections (`wyślij do
+Marka znaczy do Marcina` → `wyślij do Marcina`), fixes punctuation and Polish
+diacritics, and on pure silence returns the `EMPTY` sentinel and pastes nothing. It
+does not touch identifiers, paths, CLI flags or `camelCase`.
 
-**Domyślnie wyłączone**, tak jak w oryginale. Włączasz z menu tray →
-*Czyszczenie tekstu* → *Włącz czyszczenie*.
+**Disabled by default**, as in the original. Switch it on from the tray menu →
+*Text clean-up* → *Enable clean-up*.
 
-Reszta ustawień siedzi w tym samym podmenu, w trzech grupach — każda podpisana
-aktualnym wyborem, więc stan widać bez rozwijania:
+The rest of the settings live in the same submenu, in three groups — each labelled
+with the current choice, so the state is visible without expanding anything:
 
 ```
-Czyszczenie tekstu >
-    [ ] Wlacz czyszczenie
+Text clean-up >
+    [ ] Enable clean-up
     ---
     Provider: DeepSeek API >     Anthropic API / DeepSeek API / Claude Code CLI
-    Model: deepseek-v4-flash >   modele wybranego providera
-    Styl: Domyslny >             Domyslny / Czat / Doslowny
+    Model: deepseek-v4-flash >   the selected provider's models
+    Style: Default >             Default / Chat / Verbatim
     ---
-    Klucz API: anthropic...
-    Klucz API: deepseek...
+    API key: anthropic...
+    API key: deepseek...
 ```
 
-Lista modeli pokazuje **tylko modele aktywnego providera** — po przełączeniu na
-DeepSeeka masz tam `deepseek-v4-flash` i `deepseek-v4-pro`, po przełączeniu na
-Anthropic `claude-haiku-4-5` i `claude-sonnet-5`.
+The model list shows **only the active provider's models** — after switching to
+DeepSeek you get `deepseek-v4-flash` and `deepseek-v4-pro`, after switching to
+Anthropic `claude-haiku-4-5` and `claude-sonnet-5`.
 
-### Który provider
+### Which provider
 
 | | Anthropic API | DeepSeek API | Claude Code CLI |
 |---|---|---|---|
-| Model domyślny | `claude-haiku-4-5` | `deepseek-v4-flash` | `claude-sonnet-5` |
+| Default model | `claude-haiku-4-5` | `deepseek-v4-flash` | `claude-sonnet-5` |
 | Input / 1M | $1.00 | **$0.14** | — |
 | Output / 1M | $5.00 | **$0.28** | — |
-| Koszt / dyktowanie | ~$0.0026 | ~$0.00025 | subskrypcja |
-| Czas | ~1 s (nie mierzone) | **~1,5 s** (zmierzone z PL) | **~5 s** (zmierzone) |
-| Klucz API | wymagany | wymagany | **niepotrzebny** |
-| Ruch idzie do | Anthropic (USA) | **DeepSeek (Chiny)** | Anthropic (Twoja subskrypcja) |
+| Cost / dictation | ~$0.0026 | ~$0.00025 | subscription |
+| Time | ~1 s (not measured) | **~1.5 s** (measured from PL) | **~5 s** (measured) |
+| API key | required | required | **not needed** |
+| Traffic goes to | Anthropic (USA) | **DeepSeek (China)** | Anthropic (your subscription) |
 
-DeepSeek jest ~10× tańszy i mówi protokołem Anthropic Messages pod innym
-`base_url`, więc obsługuje go ten sam klient. Cache promptu też działa lepiej:
-minimalny cache'owalny prefiks Anthropic dla Haiku 4.5 to 4096 tokenów, a nasz
-prompt systemowy ma ~1100 — czyli u Anthropic **cache w ogóle nie zadziała**,
-a DeepSeek cache'uje automatycznie bez progu.
+DeepSeek is ~10× cheaper and speaks the Anthropic Messages protocol at a different
+`base_url`, so the same client serves it. Prompt caching also works better: the
+minimum cacheable prefix at Anthropic for Haiku 4.5 is 4096 tokens and our system
+prompt is ~1100 — meaning at Anthropic **the cache will not engage at all**, while
+DeepSeek caches automatically with no threshold.
 
-Opóźnienie DeepSeeka z Polski wyszło ~1,5 s dla obu modeli — czyli cena nie jest
-tu kompromisem za czekanie. Polszczyzna na teście z przerywnikami, autopoprawką
-i identyfikatorem `user_id` wypadła poprawnie: `user_id` nietknięty.
+DeepSeek's latency from Poland came out at ~1.5 s for both models — so the price is
+not a trade-off against waiting here. Polish on a test with fillers, a
+self-correction and the identifier `user_id` came out correct: `user_id` untouched.
 
-**Przez Claude Code CLI wybieraj Sonneta, nie Haiku.** Wbrew intuicji: w pięciu
-przebiegach tego samego tekstu haiku-4-5 zajmował 19,8–60+ s (dwa razy przekroczył
-limit czasu), a sonnet-5 trzymał się 4,2–5,7 s. Narzut CLI dominuje nad szybkością
-samego modelu. Dlatego domyślnym modelem CLI jest Sonnet.
+**Through the Claude Code CLI pick Sonnet, not Haiku.** Counter-intuitively: over
+five runs of the same text haiku-4-5 took 19.8–60+ s (twice exceeding the timeout),
+while sonnet-5 stayed at 4.2–5.7 s. The CLI's own overhead dominates the model's
+speed. That is why the default CLI model is Sonnet.
 
-**Zanim włączysz DeepSeeka: ruch idzie na serwery w Chinach.** Do treści
-służbowych używaj Claude Code CLI (idzie przez Twoją subskrypcję) albo wyłącz
-czyszczenie zupełnie.
+**Before you switch DeepSeek on: the traffic goes to servers in China.** For work
+material use the Claude Code CLI (it goes through your subscription) or switch
+clean-up off entirely.
 
-Nie zgaduj, który jest najlepszy — zmierz na swoim tekście:
+Do not guess which one is best — measure it on your own text:
 
 ```powershell
 .\run.ps1 -Benchmark "no wiec yyy wyslij to do Marka znaczy do Marcina"
 ```
 
-Przepuszcza ten sam tekst przez każdego gotowego providera i wypisuje czasy oraz
-wyniki obok siebie.
+It runs the same text through every ready provider and prints the times and the
+results side by side.
 
-### Porównanie jakościowe
+### Quality comparison
 
-Szybkość to połowa pytania. Druga połowa brzmi „czy mogę mu zaufać z moim
-tekstem" — i odpowiada na nią:
+Speed is half the question. The other half is "can I trust it with my text" — and
+this answers it:
 
 ```powershell
-.\run.ps1 -Quality                      # wszyscy gotowi providerzy
-.\run.ps1 -Quality -Provider deepseek   # tylko jeden
+.\run.ps1 -Quality                      # every ready provider
+.\run.ps1 -Quality -Provider deepseek   # just one
 ```
 
-Przepuszcza stały zestaw trudnych transkrypcji (identyfikatory, `camelCase`,
-ścieżki, autopoprawki, „nie" jako kontrast, halucynacje Whispera na ciszy,
-transkrypcja będąca poleceniem) i sprawdza **błędy mechaniczne**: zgubiony
-identyfikator, zostawiony przerywnik, model odpowiadający zamiast czyścić.
-Styl oceniasz sam — tego nie da się zmierzyć.
+It runs a fixed set of difficult transcripts (identifiers, `camelCase`, paths,
+self-corrections, "nie" as a contrast, Whisper hallucinations on silence, a
+transcript that is an instruction) and checks for **mechanical errors**: a lost
+identifier, a filler left in, the model answering instead of cleaning. You judge the
+style yourself — that cannot be measured.
 
-Zestaw jest też testem regresyjnym promptu: zmień `prompts.py` albo model,
-uruchom ponownie i zobacz, co się zepsuło. Przypadki są w
-`whisperdictate/enhance/quality.py`, każdy z uzasadnieniem, po co istnieje.
+The set doubles as a prompt regression suite: change `prompts.py` or the model, run
+it again, and see what broke. The cases live in
+`whisperdictate/enhance/quality.py`, each with a rationale for why it exists.
 
-Zmierzone (12 przypadków, jeden przebieg):
+Measured (12 cases, one run):
 
-| | Błędy | Śr. czas |
+| | Errors | Avg time |
 |---|---|---|
-| `deepseek-v4-pro` | 0 / 12 | 1,54 s |
-| `deepseek-v4-flash` | 0 / 12 | 1,60 s |
-| `claude_cli` + `claude-haiku-4-5` | 0 / 12 | 20,9 s |
-| `claude_cli` + `claude-sonnet-5` | 1 / 12 | 4,25 s |
+| `deepseek-v4-pro` | 0 / 12 | 1.54 s |
+| `deepseek-v4-flash` | 0 / 12 | 1.60 s |
+| `claude_cli` + `claude-haiku-4-5` | 0 / 12 | 20.9 s |
+| `claude_cli` + `claude-sonnet-5` | 1 / 12 | 4.25 s |
 
-Jeden przebieg nie wystarcza — te modele nie są deterministyczne. Na powtórzeniu
-×5 najtrudniejszych przypadków **Pro okazał się wyraźnie spójniejszy niż Flash**
-przy tym samym czasie: Flash zwrócił nazwę własną w trzech różnych formach
-(`DeepSick`, `Deepsika`, `DeepSeeka`) i raz zamienił znaczące „jakby" na
-„jakieś"; Pro dał pięć razy ten sam wynik. Jeśli zależy Ci na powtarzalności,
-Pro nie kosztuje tu czasu — tylko tokeny.
+One run is not enough — these models are not deterministic. Repeating the hardest
+cases ×5, **Pro turned out to be clearly more consistent than Flash** at the same
+speed: Flash returned the proper noun in three different forms (`DeepSick`,
+`Deepsika`, `DeepSeeka`) and once replaced a meaningful "jakby" with "jakieś"; Pro
+gave the same result five times over. If repeatability matters to you, Pro costs no
+time here — only tokens.
 
-### Klucze API
+### API keys
 
-Nie trafiają do pliku konfiguracyjnego. Lądują w **Menedżerze poświadczeń
-Windows**, szyfrowane per użytkownik, osobny wpis na providera:
+They do not go into the config file. They land in the **Windows Credential
+Manager**, encrypted per user, one entry per provider:
 
 ```powershell
 .\run.ps1 -SetApiKey anthropic
 .\run.ps1 -SetApiKey deepseek
 ```
 
-Albo z menu tray → *Czyszczenie tekstu* → *Klucz API: …*. Zmienne
-`ANTHROPIC_API_KEY` i `DEEPSEEK_API_KEY` mają pierwszeństwo; każdy provider
-czyta wyłącznie swoją, więc jedna nie przesłania drugiej.
+Or from the tray menu → *Text clean-up* → *API key: …*. The `ANTHROPIC_API_KEY` and
+`DEEPSEEK_API_KEY` variables take precedence; each provider reads only its own, so
+one never shadows the other.
 
-### Zasada fail-soft
+### The fail-soft rule
 
-Awaria czyszczenia **nigdy nie kosztuje dyktowania**. Brak klucza, limit API, brak
-sieci, timeout, błąd providera — wkleja się surowa transkrypcja, a powód ląduje
-w logu. Historia zapisuje obie wersje (`text` i `raw_text`), więc złe czyszczenie
-też nie niszczy oryginału.
+A clean-up failure **never costs you a dictation**. A missing key, an API limit, no
+network, a timeout, a provider error — the raw transcript is pasted and the reason
+goes to the log. The history records both versions (`text` and `raw_text`), so a bad
+clean-up does not destroy the original either.
 
-Osobny bezpiecznik: gdy odpowiedź modelu jest nieproporcjonalnie długa względem
-transkrypcji, jest odrzucana. To przypadek, w którym model **odpowiedział** na
-Twoje dyktowanie zamiast je oczyścić — wtedy lepszy jest surowy tekst.
+A separate safeguard: when the model's reply is disproportionately long relative to
+the transcript, it is rejected. That is the case where the model **answered** your
+dictation instead of cleaning it — and then the raw text is the better one.
 
-Test bez mikrofonu:
+Test it without a microphone:
 
 ```powershell
 .\run.ps1 -Enhance "no wiec yyy wyslij to do Marka znaczy do Marcina"
 ```
 
-## Konfiguracja
+## Configuration
 
-Plik: `%APPDATA%\WhisperDictateWin\config.toml` (tworzony przy pierwszym starcie).
-Pełny opis opcji z komentarzami: [`config.example.toml`](config.example.toml).
+File: `%APPDATA%\WhisperDictateWin\config.toml` (created on first start). Full
+description of the options with comments:
+[`config.example.toml`](config.example.toml).
 
-Najczęściej zmieniane:
+The ones changed most often:
 
-| Klucz | Domyślnie | Znaczenie |
+| Key | Default | Meaning |
 |---|---|---|
-| `transcription.language` | `"pl"` | dyktowanie: `pl`, `en` albo `auto` |
-| `ui.language` | z systemu | interfejs: `pl` albo `en` (fallback: `en`) |
-| `transcription.model` | `"large-v3-turbo"` | mniejszy = szybszy, mniej dokładny |
-| `hotkey.key` | `"alt_r"` | `alt_l`, `ctrl_r`, `f1`–`f20`, `scroll_lock`, `pause` |
-| `hotkey.mode` | `"hold"` | `hold` albo `toggle` |
-| `audio.device` | `null` | nazwa mikrofonu; ustawiana z menu tray |
-| `output.clipboard_history` | `false` | `true` = dyktowania trafiają też do Win+V |
-| `output.auto_paste` | `true` | `false` = tylko schowek, bez Ctrl+V |
-| `[replacements]` | pusta | słownik zamian, np. `"kubernetes" = "Kubernetes"` |
+| `transcription.language` | `"pl"` | dictation: `pl`, `en` or `auto` |
+| `ui.language` | from the system | interface: `pl` or `en` (fallback: `en`) |
+| `transcription.model` | `"large-v3-turbo"` | smaller = faster, less accurate |
+| `hotkey.key` | `"ctrl_r"` | `alt_l`, `alt_r`, `ctrl_l`, `f1`–`f20`, `scroll_lock`, `pause` |
+| `hotkey.mode` | `"hold"` | `hold` or `toggle` |
+| `audio.device` | `null` | microphone name; set from the tray menu |
+| `output.clipboard_history` | `false` | `true` = dictations also reach Win+V |
+| `output.auto_paste` | `true` | `false` = clipboard only, no Ctrl+V |
+| `[replacements]` | empty | substitution table, e.g. `"kubernetes" = "Kubernetes"` |
 
-Aplikacja **nadpisuje** ten plik przy zmianie ustawień z menu — komentarze w nim
-nie przetrwają. Notatki trzymaj w `config.example.toml`.
+The app **overwrites** this file when you change a setting from the menu —
+comments in it will not survive. Keep notes in `config.example.toml`.
 
-## Diagnostyka
+## Diagnostics
 
 ```powershell
-.\run.ps1 -Check                      # CUDA, mikrofony, hotkey, ładowanie modelu
-.\run.ps1 -ListDevices                # mikrofony (WASAPI)
-.\run.ps1 -ListDevices -All           # + duplikaty z MME/DirectSound/WDM-KS
-.\run.ps1 -Record 5                   # nagraj 5 s i wypisz transkrypcję (bez hotkeya)
-.\run.ps1 -Record 5 -Device "Anker"   # ...z konkretnego mikrofonu, bez zmiany configu
-.\run.ps1 -SetApiKey                  # zapisz klucz API w Menedżerze poświadczeń
-.\run.ps1 -Enhance "no wiec yyy test" # przetestuj czyszczenie tekstu
-.\run.ps1 -Trace                      # logowanie DEBUG
+.\run.ps1 -Check                      # CUDA, microphones, hotkey, model loading
+.\run.ps1 -ListDevices                # microphones (WASAPI)
+.\run.ps1 -ListDevices -All           # + duplicates from MME/DirectSound/WDM-KS
+.\run.ps1 -Record 5                   # record 5 s and print the transcript (no hotkey)
+.\run.ps1 -Record 5 -Device "Anker"   # ...from a specific microphone, without changing the config
+.\run.ps1 -SetApiKey                  # store an API key in the Credential Manager
+.\run.ps1 -Enhance "no wiec yyy test" # test the text clean-up
+.\run.ps1 -Trace                      # DEBUG logging
 ```
 
 Log: `%APPDATA%\WhisperDictateWin\whisperdictate.log`.
-Historia transkrypcji: `%APPDATA%\WhisperDictateWin\history.jsonl`.
+Transcription history: `%APPDATA%\WhisperDictateWin\history.jsonl`.
 
-#### Historia nie rośnie w nieskończoność
+#### The history does not grow without bound
 
-Plik jest **przycinany** do `history.max_entries` (domyślnie 5000), sprawdzane co
-100 dopisów. Zmierzone na realnych danych: mediana wpisu 667 B, średnia 871 B,
-najdłuższy widziany 3165 B (z `raw_text`, czyli przy włączonym czyszczeniu).
+The file is **trimmed** to `history.max_entries` (5000 by default), checked every
+100 appends. Measured on real data: median entry 667 B, mean 871 B, longest seen
+3165 B (with `raw_text`, i.e. with clean-up enabled).
 
-| `max_entries` | sufit rozmiaru |
+| `max_entries` | size ceiling |
 |---|---|
-| 5000 (domyślnie) | **~4,2 MB** |
-| 2000 | ~1,7 MB |
-| 1000 | ~0,83 MB |
+| 5000 (default) | **~4.2 MB** |
+| 2000 | ~1.7 MB |
+| 1000 | ~0.83 MB |
 
-Parsowanie pełnych 5000 wpisów to 23 ms, a dzieje się po wklejeniu, na wątku
-roboczym. Nie ma tu problemu do rozwiązania — dlatego nie ma kasowania „starszego
-niż N dni" ani osobnego okna ustawień.
+Parsing the full 5000 entries takes 23 ms, and it happens after the paste, on a
+worker thread. There is no problem to solve here — which is why there is no "older
+than N days" deletion and no separate settings window.
 
-**Obniżając limit, pamiętaj o dwóch oknach:** po każdym dyktowaniu skanowane jest
-**300** ostatnich wpisów w poszukiwaniu nazw własnych, a `-SuggestVocabulary`
-czyta **1000**. Poniżej tych wartości propozycje słownika mają mniej danych.
-`history.enabled = false` wyłącza zapis całkowicie — ale wtedy *Skopiuj ostatnią
-transkrypcję* nie ma z czego czytać i znika z menu.
+**If you lower the limit, mind two windows:** after every dictation the last **300**
+entries are scanned for proper nouns, and `-SuggestVocabulary` reads **1000**. Below
+those values the vocabulary suggestions have less to work with.
+`history.enabled = false` disables recording entirely — but then *Copy last
+transcription* has nothing to read and disappears from the menu.
 
-### Typowe problemy
+### Common problems
 
-**„CTranslate2 NIEDOSTEPNY" albo praca na CPU mimo karty NVIDIA**
-Brakuje bibliotek CUDA. `.\.venv\Scripts\python.exe -m pip install -r requirements-cuda.txt`.
-Potrzebny jest sterownik NVIDIA obsługujący CUDA 12 (R525 lub nowszy).
+**"CTranslate2 UNAVAILABLE", or running on CPU despite an NVIDIA card**
+The CUDA libraries are missing. `.\.venv\Scripts\python.exe -m pip install -r requirements-cuda.txt`.
+You need an NVIDIA driver supporting CUDA 12 (R525 or newer).
 
-**Hotkey nie reaguje**
-Jeśli okno z fokusem działa jako administrator, a WhisperDictate nie, Windows
-zablokuje mu podglądanie klawiatury (User Interface Privilege Isolation). Uruchom
-aplikację z tymi samymi uprawnieniami co docelowe okno.
+**The hotkey does not respond**
+If the focused window runs as administrator and WhisperDictate does not, Windows
+blocks it from observing the keyboard (User Interface Privilege Isolation). Run the
+app with the same privileges as the target window.
 
-**Tekst wkleja się w złe miejsce albo wcale**
-Podnieś `output.paste_delay_ms` (np. do 250). Niektóre aplikacje oparte o Electron
-czytają schowek asynchronicznie. Alternatywa: `output.auto_paste = false` i Ctrl+V
-ręcznie.
+**The text pastes in the wrong place, or not at all**
+Raise `output.paste_delay_ms` (to 250, say). Some Electron-based applications read
+the clipboard asynchronously. The alternative: `output.auto_paste = false` and
+Ctrl+V by hand.
 
-**Transkrypcje z niczego, np. „Napisy stworzone przez społeczność Amara.org"**
-Klasyczna halucynacja Whispera na ciszy. Upewnij się, że
-`transcription.vad_filter = true`, i sprawdź `-ListDevices`, czy nagrywasz z
-właściwego mikrofonu.
+**Transcripts out of nowhere, e.g. "Napisy stworzone przez społeczność Amara.org"**
+The classic Whisper hallucination on silence. Make sure
+`transcription.vad_filter = true`, and check with `-ListDevices` that you are
+recording from the right microphone.
 
-## Czego tu nie ma
+## What is not here
 
-Oryginał ma kilka rzeczy, których ta wersja świadomie nie odtwarza:
+The original has a few things this version deliberately does not reproduce:
 
-- **Providerzy OpenAI, OpenRouter i Ollama** dla czyszczenia tekstu. Zaimplementowane
-  są trzy: Anthropic API, DeepSeek API i Claude Code CLI (dwa ostatnie to dodatek,
-  oryginał ich nie ma). Interfejs `Provider` jest jednometodowy, więc dołożenie
-  kolejnego to jedna klasa.
-- **Okno z dashboardem** (8 zakładek, statystyki, przeglądarka historii). Historia
-  jest zapisywana do JSONL, ale przegląda się ją w edytorze.
-- **Pobieranie modeli z paskiem postępu.** Zajmuje się tym Hugging Face Hub.
+- **The OpenAI, OpenRouter and Ollama providers** for text clean-up. Three are
+  implemented: Anthropic API, DeepSeek API and Claude Code CLI (the last two are an
+  addition; the original does not have them). The `Provider` interface has a single
+  method, so adding another is one class.
+- **A dashboard window** (8 tabs, statistics, a history browser). The history is
+  written to JSONL, but you read it in an editor.
+- **Model downloads with a progress bar.** Hugging Face Hub handles that.
 
-Architektura jest rozdzielona (rdzeń nie wie nic o UI), więc dołożenie okna nie
-wymaga przepisywania logiki. Szczegóły: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The architecture is separated (the core knows nothing about the UI), so adding a
+window would not require rewriting the logic. Details:
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## Podziękowania
+## Acknowledgements
 
-- **[Jacek Gajewski](https://github.com/jacek-gajewski-ice)** — autor oryginalnego
-  [WhisperDictate](https://github.com/jacek-gajewski-ice/whisper-app) na macOS.
-  Ten projekt istnieje, bo tamten istniał pierwszy: pomysł, projekt interakcji
-  i decyzje produktowe są jego. Jego `CLAUDE.md` z notatkami inżynierskimi był
-  najlepszą dokumentacją, jaką można było mieć przy odtwarzaniu zachowania.
+- **[Jacek Gajewski](https://github.com/jacek-gajewski-ice)** — author of the
+  original [WhisperDictate](https://github.com/jacek-gajewski-ice/whisper-app) for
+  macOS. This project exists because that one existed first: the idea, the
+  interaction design and the product decisions are his. His `CLAUDE.md` with
+  engineering notes was the best documentation anyone could have had while
+  reconstructing the behaviour.
 - **[FreeFlow](https://github.com/zachlatta/freeflow)**
-  i **[VoiceInk](https://github.com/Beingpax/VoiceInk)** — wzorzec promptu
-  czyszczącego, za oryginałem, który je kredytuje.
+  and **[VoiceInk](https://github.com/Beingpax/VoiceInk)** — the clean-up prompt
+  pattern, by way of the original, which credits them.
 - **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** (SYSTRAN)
-  i **[CTranslate2](https://github.com/OpenNMT/CTranslate2)** — silnik transkrypcji.
-- **[Whisper](https://github.com/openai/whisper)** (OpenAI) — model.
+  and **[CTranslate2](https://github.com/OpenNMT/CTranslate2)** — the transcription
+  engine.
+- **[Whisper](https://github.com/openai/whisper)** (OpenAI) — the model.
 
-## Licencja
+## Licence
 
-Kod tego repozytorium: MIT. Modele Whisper: MIT (OpenAI). faster-whisper: MIT.
+The code in this repository: MIT. The Whisper models: MIT (OpenAI).
+faster-whisper: MIT.
 
-Kod nie jest pochodną oryginału (żadna linijka nie została przeniesiona — to inny
-język i inne frameworki), więc licencja tamtego projektu nie ma tu zastosowania.
-Atrybucja powyżej jest kwestią uczciwości, nie wymogu prawnego.
+The code is not a derivative of the original (not a line was carried over — it is a
+different language and different frameworks), so that project's licence does not
+apply here. The attribution above is a matter of honesty, not a legal requirement.

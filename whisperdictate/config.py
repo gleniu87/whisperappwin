@@ -153,19 +153,19 @@ class Config:
                 with path.open("rb") as fh:
                     data = _deep_merge(data, tomllib.load(fh))
             except (OSError, tomllib.TOMLDecodeError) as exc:
-                log.error("Nie udalo sie wczytac %s (%s) - uzywam domyslnych ustawien", path, exc)
+                log.error("Could not read %s (%s) - falling back to the defaults", path, exc)
         cfg = cls(path, data)
         cfg._validate()
         if not path.exists():
             cfg.save()
-            log.info("Utworzono domyslny config: %s", path)
+            log.info("Created a default config: %s", path)
         elif cfg._guessed_ui_language:
             # A config written before ui.language existed. Write the guess down
             # once, so the file says what the app is doing and the setting is
             # findable by someone reading it - rather than re-guessing at every
             # start and looking, in the file, like it was never set.
             cfg.save()
-            log.info("Dopisano ui.language = %r do configu", cfg.get("ui.language"))
+            log.info("Wrote ui.language = %r into the config", cfg.get("ui.language"))
         return cfg
 
     # -- access ---------------------------------------------------------
@@ -203,7 +203,7 @@ class Config:
                 tomli_w.dump(_strip_nones(payload), fh)
             tmp.replace(self.path)
         except OSError as exc:
-            log.error("Nie udalo sie zapisac configu %s: %s", self.path, exc)
+            log.error("Could not save the config %s: %s", self.path, exc)
 
     # -- validation -----------------------------------------------------
 
@@ -225,7 +225,7 @@ class Config:
 
         replacements = self.get("replacements")
         if not isinstance(replacements, dict):
-            log.warning("[replacements] nie jest tabela - ignoruje")
+            log.warning("[replacements] is not a table - ignoring it")
             self.set("replacements", {}, save=False)
 
     def _resolve_ui_language(self) -> None:
@@ -243,10 +243,10 @@ class Config:
         self._guessed_ui_language = True
         detected = detect_system_language()
         if current is None:
-            log.info("Jezyk interfejsu z systemu: %s", detected)
+            log.info("Interface language taken from the system: %s", detected)
         else:
             log.warning(
-                "ui.language = %r nie jest jednym z %s - uzywam %r",
+                "ui.language = %r is not one of %s - using %r",
                 current, UI_LANGUAGES, detected,
             )
         self.set("ui.language", detected, save=False)
@@ -255,19 +255,19 @@ class Config:
         value = self.get(dotted)
         if value not in allowed:
             fallback = _default_for(dotted)
-            log.warning("%s = %r nie jest jednym z %s - uzywam %r", dotted, value, allowed, fallback)
+            log.warning("%s = %r is not one of %s - using %r", dotted, value, allowed, fallback)
             self.set(dotted, fallback, save=False)
 
     def _clamp(self, dotted: str, low: float, high: float) -> None:
         value = self.get(dotted)
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             fallback = _default_for(dotted)
-            log.warning("%s = %r nie jest liczba - uzywam %r", dotted, value, fallback)
+            log.warning("%s = %r is not a number - using %r", dotted, value, fallback)
             self.set(dotted, fallback, save=False)
             return
         clamped = max(low, min(high, value))
         if clamped != value:
-            log.warning("%s = %r poza zakresem [%s, %s] - przycinam do %r", dotted, value, low, high, clamped)
+            log.warning("%s = %r outside [%s, %s] - clamping to %r", dotted, value, low, high, clamped)
             self.set(dotted, clamped, save=False)
 
 

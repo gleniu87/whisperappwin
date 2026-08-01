@@ -148,7 +148,7 @@ class DictationController:
         min_seconds = float(self.config.get("audio.min_seconds", 0.4))
         duration = audio.size / 16_000 if audio is not None else 0.0
         if audio is None or duration < min_seconds:
-            log.info("Nagranie %.2f s ponizej progu %.2f s - pomijam", duration, min_seconds)
+            log.info("Recording of %.2f s below the %.2f s threshold - skipping", duration, min_seconds)
             self._set_state(State.IDLE, t("detail.too_short"))
             return
 
@@ -170,14 +170,14 @@ class DictationController:
         if paused:
             self.on_cancel()
         self._set_state(State.PAUSED if paused else State.IDLE)
-        log.info("Dyktowanie %s", "wstrzymane" if paused else "wznowione")
+        log.info("Dictation %s", "paused" if paused else "resumed")
 
     # -- settings changes -------------------------------------------------
 
     def set_language(self, language: str) -> None:
         """The language Whisper transcribes. Not the language of the interface."""
         self.config.set("transcription.language", language)
-        log.info("Jezyk dyktowania: %s", language)
+        log.info("Dictation language: %s", language)
         self._set_state(self._state)
 
     def set_ui_language(self, code: str) -> None:
@@ -189,14 +189,14 @@ class DictationController:
         """
         active = i18n.use(code)
         self.config.set("ui.language", active)
-        log.info("Jezyk interfejsu: %s", active)
+        log.info("Interface language: %s", active)
         self._set_state(self._state)
 
     def set_audio_device(self, spec: int | str | None) -> None:
         """Choose the input device. Applies from the next recording onwards."""
         self.config.set("audio.device", spec)
         self.recorder.device_spec = spec
-        log.info("Mikrofon: %s", spec if spec is not None else "domyslny systemowy")
+        log.info("Microphone: %s", spec if spec is not None else "system default")
         self._set_state(self._state)
 
     def attach_hotkey(self, listener) -> None:  # noqa: ANN001 - HotkeyListener; avoids a cycle
@@ -226,13 +226,13 @@ class DictationController:
         self.transcriber.initial_prompt = vocabulary.whisper_priming(
             vocabulary.combined(raw), self.config.get("transcription.initial_prompt", "")
         ) or None
-        log.info("Slownik nazw wlasnych: %d pozycji", len(vocabulary.terms(raw)))
+        log.info("Proper-noun vocabulary: %d entries", len(vocabulary.terms(raw)))
         self._set_state(self._state)
 
     def set_enhancement_enabled(self, enabled: bool) -> None:
         """Turn transcript clean-up on or off, warning if the provider is unusable."""
         self.config.set("enhancement.enabled", enabled)
-        log.info("Czyszczenie tekstu %s", "wlaczone" if enabled else "wylaczone")
+        log.info("Text clean-up %s", "enabled" if enabled else "disabled")
         if enabled:
             problem = self.enhancement.check()
             if problem:
@@ -250,7 +250,7 @@ class DictationController:
             self.config.set("enhancement.model", registry.default_model(provider), save=False)
         self.config.save()
 
-        log.info("Provider czyszczenia: %s / %s", provider, self.config.get("enhancement.model"))
+        log.info("Clean-up provider: %s / %s", provider, self.config.get("enhancement.model"))
         problem = self.enhancement.check()
         if problem and self.enhancement.enabled:
             self._notify(
@@ -260,12 +260,12 @@ class DictationController:
 
     def set_enhancement_model(self, model: str) -> None:
         self.config.set("enhancement.model", model)
-        log.info("Model czyszczenia: %s", model)
+        log.info("Clean-up model: %s", model)
         self._set_state(self._state)
 
     def set_enhancement_prompt(self, prompt: str) -> None:
         self.config.set("enhancement.prompt", prompt)
-        log.info("Styl czyszczenia: %s", prompt)
+        log.info("Clean-up style: %s", prompt)
         self._set_state(self._state)
 
     def set_model(self, model: str) -> None:
@@ -302,7 +302,7 @@ class DictationController:
 
         raw_text = process(result.text, self.config.get("replacements", {}))
         if not raw_text:
-            log.info("Pusta transkrypcja - nic do wklejenia")
+            log.info("Empty transcript - nothing to paste")
             self.sounds.play("cancel")
             self._set_state(State.IDLE, t("detail.silence"))
             return
@@ -317,7 +317,7 @@ class DictationController:
 
         if not text:
             # The prompt's EMPTY sentinel: the model judged this pure filler.
-            log.info("Warstwa czyszczaca uznala transkrypcje za pusta - nie wklejam")
+            log.info("The clean-up layer judged the transcript empty - not pasting")
             self.sounds.play("cancel")
             self._set_state(State.IDLE, t("detail.noise_rejected"))
             return
@@ -407,7 +407,7 @@ class DictationController:
             log.warning("%s", exc)
             self._notify(str(exc), error=True)
             return
-        log.info("Skopiowano ostatnia transkrypcje (%d znakow)", len(text))
+        log.info("Copied the last transcript (%d characters)", len(text))
         self._notify(t("notify.copied_last", chars=len(text)))
 
     def _last_transcription(self) -> str:
@@ -424,7 +424,7 @@ class DictationController:
             entries = self.history.recent(1)
             return str(entries[-1].get("text", "")) if entries else ""
         except Exception:  # noqa: BLE001 - a torn history must not break the rescue
-            log.debug("Nie moge odczytac ostatniej transkrypcji", exc_info=True)
+            log.debug("Cannot read the last transcript", exc_info=True)
             return ""
 
     def refresh_vocabulary_suggestions(self) -> None:
@@ -444,7 +444,7 @@ class DictationController:
                 self.config.get("transcription.vocabulary_rejected", ""),
             )
         except Exception:  # noqa: BLE001 - a suggestion is never worth an exception
-            log.debug("Nie moge zebrac propozycji slownika z historii", exc_info=True)
+            log.debug("Cannot collect vocabulary suggestions from history", exc_info=True)
 
     def _offer_vocabulary(self, raw_text: str, cleaned: str) -> None:
         """Notify only when this dictation produced something new."""
@@ -498,7 +498,7 @@ class DictationController:
 
     def set_suggest_vocabulary(self, enabled: bool) -> None:
         self.config.set("transcription.suggest_vocabulary", enabled)
-        log.info("Propozycje slownika %s", "wlaczone" if enabled else "wylaczone")
+        log.info("Vocabulary suggestions %s", "enabled" if enabled else "disabled")
         self._set_state(self._state)
 
     # -- helpers ----------------------------------------------------------
@@ -513,7 +513,7 @@ class DictationController:
             try:
                 target()
             except Exception:  # noqa: BLE001 - a crashing worker must not be silent
-                log.exception("Nieobsluzony blad w watku roboczym")
+                log.exception("Unhandled error on the worker thread")
                 self._set_state(State.ERROR, t("detail.internal_error"))
             finally:
                 self._workers.discard(threading.current_thread())
@@ -528,11 +528,11 @@ class DictationController:
             try:
                 ui.set_state(state, detail)
             except Exception:  # noqa: BLE001
-                log.exception("Blad UI przy zmianie stanu")
+                log.exception("UI error on a state change")
 
     def _notify(self, message: str, *, error: bool = False) -> None:
         for ui in self._uis:
             try:
                 ui.notify(message, error=error)
             except Exception:  # noqa: BLE001
-                log.exception("Blad UI przy powiadomieniu")
+                log.exception("UI error on a notification")

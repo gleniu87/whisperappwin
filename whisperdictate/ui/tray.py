@@ -112,14 +112,14 @@ class Tray:
             self._icon.icon = _microphone_icon(STATE_COLOUR.get(state, STATE_COLOUR[State.IDLE]))
             self._icon.title = self._tooltip()
         except Exception:  # noqa: BLE001 - icon not yet realised
-            log.debug("Nie moge zaktualizowac ikony tray")
+            log.debug("Cannot update the tray icon")
 
     def notify(self, message: str, *, error: bool = False) -> None:
         try:
             title = t("tray.error_title", app=APP_NAME) if error else APP_NAME
             self._icon.notify(message, title)
         except Exception:  # noqa: BLE001 - balloon tips can be disabled by policy
-            log.debug("Powiadomienie tray niedostepne: %s", message)
+            log.debug("Tray notification unavailable: %s", message)
 
     # -- menu -----------------------------------------------------------
 
@@ -163,7 +163,7 @@ class Tray:
             ),
             pystray.Menu.SEPARATOR,
             # The two language pickers sit next to each other on purpose: side by
-            # side, "Język dyktowania" and "Język aplikacji" explain each other,
+            # side, "dictation language" and "app language" explain each other,
             # whereas either one alone reads as "the language setting".
             item(t("menu.dictation_language"), pystray.Menu(*self._language_items())),
             item(t("menu.app_language"), pystray.Menu(*self._ui_language_items())),
@@ -464,7 +464,7 @@ class Tray:
         refresh_devices()
         self._devices = list_input_devices()
         self._rebuild_menu()
-        log.info("Znaleziono %d mikrofon(ow)", len(self._devices))
+        log.info("Found %d microphone(s)", len(self._devices))
         self.notify(t("tray.devices_found", count=len(self._devices)))
 
     def _rebuild_menu(self) -> None:
@@ -480,7 +480,7 @@ class Tray:
         try:
             self._icon.title = self._tooltip()
         except Exception:  # noqa: BLE001 - icon not yet realised
-            log.debug("Nie moge zaktualizowac tooltipa tray")
+            log.debug("Cannot update the tray tooltip")
 
     def _toggle_enabled(self) -> None:
         """Master switch. Reads as on/off; the controller thinks in "paused"."""
@@ -496,7 +496,8 @@ class Tray:
 
 
 def _shorten(text: str, limit: int) -> str:
-    """Keep the tail: device names are prefixed with a generic 'Mikrofon (' word."""
+    """Keep the tail: device names start with a generic word plus a bracket, as in
+    'Microphone (' - or its localised equivalent on a non-English Windows."""
     collapsed = " ".join(text.split())
     return collapsed if len(collapsed) <= limit else collapsed[: limit - 1] + "…"
 
@@ -509,4 +510,4 @@ def _open(path) -> None:  # noqa: ANN001
             path.touch()
         os.startfile(str(path))  # noqa: S606 - intentional shell-open of a known path
     except OSError as exc:
-        log.warning("Nie moge otworzyc %s: %s", path, exc)
+        log.warning("Cannot open %s: %s", path, exc)

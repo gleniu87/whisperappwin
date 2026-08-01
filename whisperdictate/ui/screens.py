@@ -52,7 +52,7 @@ def focused_work_area() -> tuple[int, int, int, int] | None:
         work = info.rcWork
         return work.left, work.top, work.right, work.bottom
     except Exception:  # noqa: BLE001 - not Windows, or a stripped-down runtime
-        log.debug("Nie moge ustalic monitora aktywnego okna", exc_info=True)
+        log.debug("Cannot determine the active window's monitor", exc_info=True)
         return None
 
 

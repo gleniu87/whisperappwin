@@ -1,9 +1,13 @@
 """Interface text in Polish and English, and how the language gets chosen.
 
 Three surfaces speak to whoever is dictating - the tray menu, the recording
-overlay and the dialogs - and everything they say lives in `MESSAGES` below. The
-log and the CLI stay Polish: they are read by whoever is debugging, and keeping
-them out of here keeps the catalogue to the size of a screen of real UI text.
+overlay and the dialogs - and everything they say lives in `MESSAGES` below.
+
+That is the whole scope of this catalogue: the GUI, and nothing else. The log and
+the CLI are written in English directly at their call sites, not routed through
+`t()`. They are developer-facing, they get pasted into bug reports and diffs, and
+a second language in the catalogue for them would double its size without any
+user ever reading it. Do not move log or CLI strings in here.
 
 The active language is module state on purpose. The alternative is threading a
 translator object through the controller into the tray, the overlay and every
@@ -73,7 +77,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     "menu.hotkey": {"pl": "Hotkey: {key}", "en": "Hotkey: {key}"},
     "menu.enhancement": {"pl": "Czyszczenie tekstu", "en": "Text clean-up"},
     # Master switch. Phrased as "switch it on", checked while it is on - the same
-    # shape as "Włącz czyszczenie", and the opposite half of the controller's
+    # shape as menu.enhancement.enable, and the opposite half of the controller's
     # "paused". Named after dictation, not the app: the app is plainly still
     # running, since you are reading its menu.
     "menu.enabled": {"pl": "Włącz dyktowanie", "en": "Enable dictation"},

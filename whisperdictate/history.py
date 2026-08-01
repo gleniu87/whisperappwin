@@ -51,7 +51,7 @@ class History:
                 with self.path.open("a", encoding="utf-8") as fh:
                     fh.write(line + "\n")
             except _FS_ERRORS as exc:
-                log.warning("Nie moge dopisac do historii: %s", exc)
+                log.warning("Cannot append to history: %s", exc)
                 return
 
             self._appends_since_trim += 1
@@ -80,7 +80,7 @@ class History:
                     except json.JSONDecodeError:
                         continue  # torn write; skip the line, keep the file
         except _FS_ERRORS as exc:
-            log.warning("Nie moge odczytac historii: %s", exc)
+            log.warning("Cannot read history: %s", exc)
         return entries
 
     def _trim(self) -> None:
@@ -97,6 +97,6 @@ class History:
                 for entry in keep:
                     fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
             tmp.replace(self.path)
-            log.info("Historia przycieta do %d wpisow", len(keep))
+            log.info("History trimmed to %d entries", len(keep))
         except _FS_ERRORS as exc:
-            log.warning("Nie moge przyciac historii: %s", exc)
+            log.warning("Cannot trim history: %s", exc)

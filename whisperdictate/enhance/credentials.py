@@ -78,7 +78,7 @@ def set_api_key(provider: str, key: str) -> None:
     """Store a key for the current user. Raises OSError if the store rejects it."""
     key = key.strip()
     if not key:
-        raise ValueError("Klucz API jest pusty")
+        raise ValueError("API key is empty")
 
     import win32cred
 
@@ -89,14 +89,14 @@ def set_api_key(provider: str, key: str) -> None:
             "UserName": provider,
             # str, not bytes — see the encoding note at the top of this module.
             "CredentialBlob": key,
-            "Comment": f"WhisperDictate for Windows - klucz API ({provider})",
+            "Comment": f"WhisperDictate for Windows - API key ({provider})",
             # LOCAL_MACHINE, not ENTERPRISE: keys must not roam to other machines
             # with a domain profile.
             "Persist": win32cred.CRED_PERSIST_LOCAL_MACHINE,
         },
         0,
     )
-    log.info("Klucz API (%s) zapisany w Menedzerze polswiadczen", provider)
+    log.info("API key (%s) stored in Credential Manager", provider)
 
 
 def delete_api_key(provider: str) -> bool:
@@ -106,9 +106,9 @@ def delete_api_key(provider: str) -> bool:
     try:
         win32cred.CredDelete(target_for(provider), win32cred.CRED_TYPE_GENERIC, 0)
     except Exception as exc:  # noqa: BLE001 - pywintypes.error when absent
-        log.debug("Nie moge usunac polswiadczenia (%s): %s", provider, exc)
+        log.debug("Cannot delete credential (%s): %s", provider, exc)
         return False
-    log.info("Klucz API (%s) usuniety z Menedzera polswiadczen", provider)
+    log.info("API key (%s) removed from Credential Manager", provider)
     return True
 
 
@@ -129,5 +129,5 @@ def _read_credential(target: str) -> str | None:
     try:
         return blob.decode(_ENCODING).strip() or None
     except UnicodeDecodeError:
-        log.warning("Polswiadczenie %s ma nieoczekiwane kodowanie - ignoruje", target)
+        log.warning("Credential %s has an unexpected encoding - ignoring it", target)
         return None

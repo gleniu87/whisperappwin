@@ -81,7 +81,7 @@ class WorkAreaTest(unittest.TestCase):
         that ctypes can be mocked."""
         area = focused_work_area()
         if area is None:
-            self.skipTest("brak okna pierwszoplanowego")
+            self.skipTest("no foreground window")
         left, top, right, bottom = area
         self.assertLess(left, right)
         self.assertLess(top, bottom)

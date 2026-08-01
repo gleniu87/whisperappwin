@@ -20,19 +20,19 @@ from whisperdictate.enhance.service import EnhancementService, output_filter
 
 class OutputFilterTest(unittest.TestCase):
     def test_passes_clean_text_through(self):
-        self.assertEqual(output_filter("Wyślij to do Marcina."), "Wyślij to do Marcina.")
+        self.assertEqual(output_filter("Send it to Martin."), "Send it to Martin.")
 
     def test_strips_thinking_block(self):
-        raw = "<thinking>user wants a summary</thinking>\nGotowe."
-        self.assertEqual(output_filter(raw), "Gotowe.")
+        raw = "<thinking>user wants a summary</thinking>\nDone."
+        self.assertEqual(output_filter(raw), "Done.")
 
     def test_strips_think_and_reasoning_variants(self):
         self.assertEqual(output_filter("<think>x</think>A"), "A")
         self.assertEqual(output_filter("<reasoning>y</reasoning>B"), "B")
 
     def test_strips_multiline_thinking(self):
-        raw = "<thinking>\nline one\nline two\n</thinking>\n\nWynik."
-        self.assertEqual(output_filter(raw), "Wynik.")
+        raw = "<thinking>\nline one\nline two\n</thinking>\n\nResult."
+        self.assertEqual(output_filter(raw), "Result.")
 
     def test_empty_sentinel_becomes_empty_string(self):
         self.assertEqual(output_filter("EMPTY"), "")
@@ -42,18 +42,18 @@ class OutputFilterTest(unittest.TestCase):
             self.assertEqual(output_filter(variant), "", variant)
 
     def test_text_merely_containing_empty_is_kept(self):
-        self.assertEqual(output_filter("Pole EMPTY jest puste"), "Pole EMPTY jest puste")
+        self.assertEqual(output_filter("The EMPTY field is blank"), "The EMPTY field is blank")
 
     def test_unwraps_quotes_around_whole_output(self):
-        self.assertEqual(output_filter('"Wyślij to do Marcina."'), "Wyślij to do Marcina.")
+        self.assertEqual(output_filter('"Send it to Martin."'), "Send it to Martin.")
 
     def test_keeps_internal_quotes(self):
-        text = 'Powiedział "nie" i wyszedł'
+        text = 'He said "no" and left'
         self.assertEqual(output_filter(text), text)
 
     def test_does_not_unwrap_when_quotes_are_not_a_pair(self):
         """A sentence that opens with quoted speech and ends with it is not wrapped."""
-        text = '"pierwsze" a potem "drugie"'
+        text = '"first" and then "second"'
         self.assertEqual(output_filter(text), text)
 
 
@@ -82,7 +82,7 @@ class PromptTest(unittest.TestCase):
 
     def test_transcript_is_wrapped_in_a_tag(self):
         """The tag is what stops the model answering a transcript that is a question."""
-        wrapped = prompts.wrap_transcript("czy mozesz to sprawdzic")
+        wrapped = prompts.wrap_transcript("can you check this")
         self.assertTrue(wrapped.startswith("<TRANSCRIPT>"))
         self.assertTrue(wrapped.endswith("</TRANSCRIPT>"))
 
@@ -122,9 +122,9 @@ class OneDictationOneCallTest(unittest.TestCase):
         self.config.set("enhancement.enabled", True)
 
     def test_one_enhance_makes_exactly_one_provider_call(self):
-        provider = FakeProvider(reply="Gotowe.")
+        provider = FakeProvider(reply="Done.")
         with mock.patch.object(service.providers, "build", lambda *_a, **_k: provider):
-            EnhancementService(self.config).enhance("no wiec yyy gotowe", "pl")
+            EnhancementService(self.config).enhance("so um done", "pl")
         self.assertEqual(len(provider.calls), 1)
 
     def test_only_the_configured_provider_is_built(self):
@@ -132,27 +132,27 @@ class OneDictationOneCallTest(unittest.TestCase):
 
         def spy(name, **kwargs):
             built.append(name)
-            return FakeProvider(reply="Gotowe.")
+            return FakeProvider(reply="Done.")
 
         self.config.set("enhancement.provider", "deepseek")
         self.config.set("enhancement.model", "deepseek-v4-flash")
         with mock.patch.object(service.providers, "build", spy):
-            EnhancementService(self.config).enhance("tekst", "pl")
+            EnhancementService(self.config).enhance("text", "pl")
         self.assertEqual(built, ["deepseek"])
 
     def test_the_configured_model_is_the_one_sent(self):
-        provider = FakeProvider(reply="Gotowe.")
+        provider = FakeProvider(reply="Done.")
         self.config.set("enhancement.provider", "deepseek")
         self.config.set("enhancement.model", "deepseek-v4-pro")
         with mock.patch.object(service.providers, "build", lambda *_a, **_k: provider):
-            EnhancementService(self.config).enhance("tekst", "pl")
+            EnhancementService(self.config).enhance("text", "pl")
         self.assertEqual(provider.calls[0]["model"], "deepseek-v4-pro")
 
     def test_a_failure_does_not_retry_on_another_model(self):
         """Fail-soft means the raw transcript, not a second opinion."""
-        provider = FakeProvider(error=ProviderError("padlo"))
+        provider = FakeProvider(error=ProviderError("it broke"))
         with mock.patch.object(service.providers, "build", lambda *_a, **_k: provider):
-            result = EnhancementService(self.config).enhance("tekst", "pl")
+            result = EnhancementService(self.config).enhance("text", "pl")
         self.assertIsNone(result)
         self.assertEqual(len(provider.calls), 1)
 
@@ -200,20 +200,20 @@ class EnhancementServiceTest(unittest.TestCase):
     def test_disabled_service_never_calls_the_provider(self):
         provider = self.install(FakeProvider(reply="cleaned"))
         self.config.set("enhancement.enabled", False)
-        self.assertIsNone(EnhancementService(self.config).enhance("tekst", "pl"))
+        self.assertIsNone(EnhancementService(self.config).enhance("text", "pl"))
         self.assertEqual(provider.calls, [])
 
     # -- happy path ------------------------------------------------------
 
     def test_returns_cleaned_text(self):
-        self.install(FakeProvider(reply="Wyślij to do Marcina."))
+        self.install(FakeProvider(reply="Send it to Martin."))
         result = EnhancementService(self.config).enhance("no wiec yyy wyslij to do Marcina", "pl")
-        self.assertEqual(result.text, "Wyślij to do Marcina.")
+        self.assertEqual(result.text, "Send it to Martin.")
         self.assertTrue(result.changed)
 
     def test_passes_language_lock_and_wrapped_transcript(self):
         provider = self.install(FakeProvider(reply="ok"))
-        EnhancementService(self.config).enhance("tekst", "pl")
+        EnhancementService(self.config).enhance("text", "pl")
         call = provider.calls[0]
         self.assertIn("JEZYK", call["system"])
         self.assertIn("<TRANSCRIPT>", call["user"])
@@ -229,13 +229,13 @@ class EnhancementServiceTest(unittest.TestCase):
     # -- fail-soft -------------------------------------------------------
 
     def test_provider_error_returns_none(self):
-        self.install(FakeProvider(error=ProviderError("brak klucza")))
-        self.assertIsNone(EnhancementService(self.config).enhance("tekst", "pl"))
+        self.install(FakeProvider(error=ProviderError("no API key")))
+        self.assertIsNone(EnhancementService(self.config).enhance("text", "pl"))
 
     def test_unexpected_provider_exception_returns_none(self):
         """A provider bug must not cost the user their dictation."""
         self.install(FakeProvider(error=ValueError("boom")))
-        self.assertIsNone(EnhancementService(self.config).enhance("tekst", "pl"))
+        self.assertIsNone(EnhancementService(self.config).enhance("text", "pl"))
 
     def test_blank_input_is_not_sent(self):
         provider = self.install(FakeProvider(reply="x"))

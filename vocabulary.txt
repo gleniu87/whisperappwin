@@ -1,25 +1,25 @@
-# Nazwy wlasne, ktore Whisper przekreca - czesc WSPOLNA, w repozytorium.
+# Proper nouns Whisper garbles - the SHARED half, kept in the repository.
 #
-# Ta lista jest wersjonowana i dzielona miedzy maszyny. Trzymaj tu nazwy
-# techniczne i publiczne: narzedzia, biblioteki, firmy z branzy.
+# This list is version-controlled and shared across machines. Keep technical and
+# public names here: tools, libraries, companies in the field.
 #
-# Nazwy klientow, projektow i osob NIE nalezy tu wpisywac - na to jest
-# `transcription.vocabulary` w %APPDATA%\WhisperDictateWin\config.toml,
-# ktory nie trafia do gita. Obie listy sa laczone.
+# Client, project and personal names do NOT belong here - that is what
+# `transcription.vocabulary` in %APPDATA%\WhisperDictateWin\config.toml is for,
+# and it never reaches git. Both lists are merged.
 #
-# Format: po przecinku albo po jednej w linii. Nazwy wieloczlonowe sa OK.
-# `#` zaczyna komentarz. Zapisuj w formie PODSTAWOWEJ (mianownik) - model
-# odmienia je sam, zgodnie z jezykiem zdania.
+# Format: comma-separated, or one per line. Multi-word names are fine. A `#`
+# starts a comment. Write the BASE form (nominative) - the model inflects them
+# itself, to match the language of the sentence.
 
-# Modele i dostawcy LLM
+# LLM models and providers
 Anthropic, Claude, Claude Code, DeepSeek, Sonnet, Haiku, Opus
 OpenAI, Whisper, Hugging Face
 
-# Stos tego projektu
+# This project's stack
 faster-whisper, CTranslate2, PortAudio, WASAPI, DirectSound
 Python, PowerShell, pystray, pynput
 
-# Ogolnie techniczne
+# General technical
 Kubernetes, Terraform, Docker, PostgreSQL, Elasticsearch, Redis
 GitHub, GitLab, Jira, Confluence
 TypeScript, JavaScript, React, Node.js

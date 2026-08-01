@@ -130,10 +130,10 @@ class EnhancementService:
         try:
             raw_reply = provider.complete(system, user, self.model, timeout)
         except ProviderError as exc:
-            log.warning("Czyszczenie tekstu nieudane (%s) - wklejam surowy tekst", exc)
+            log.warning("Text clean-up failed (%s) - pasting the raw text", exc)
             return None
         except Exception:  # noqa: BLE001 - a provider bug must not eat the dictation
-            log.exception("Nieoczekiwany blad czyszczenia tekstu - wklejam surowy tekst")
+            log.exception("Unexpected clean-up error - pasting the raw text")
             return None
 
         cleaned = output_filter(raw_reply)
@@ -141,14 +141,14 @@ class EnhancementService:
 
         if _looks_like_an_answer(cleaned, text):
             log.warning(
-                "Odpowiedz LLM (%d znakow) nieproporcjonalna do transkrypcji (%d) "
-                "- wyglada na odpowiedz, nie czyszczenie; wklejam surowy tekst",
+                "LLM reply (%d characters) out of proportion to the transcript (%d) "
+                "- looks like an answer, not a clean-up; pasting the raw text",
                 len(cleaned), len(text),
             )
             return None
 
         log.info(
-            "Czyszczenie: %d -> %d znakow w %.2f s (%s / %s)",
+            "Clean-up: %d -> %d characters in %.2f s (%s / %s)",
             len(text), len(cleaned), elapsed, provider.name, self.model,
         )
         return EnhancementResult(

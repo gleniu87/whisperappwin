@@ -29,8 +29,8 @@ class HistoryTest(unittest.TestCase):
         self.assertFalse(self.path.exists())
 
     def test_non_ascii_is_stored_readable_not_escaped(self):
-        History(self.path).append(text="zażółć gęślą jaźń")
-        self.assertIn("zażółć", self.path.read_text(encoding="utf-8"))
+        History(self.path).append(text="non-ascii ĄĆĘŁŃÓŚŹŻ ąćęłńóśźż")
+        self.assertIn("ĄĆĘŁŃÓŚŹŻ", self.path.read_text(encoding="utf-8"))
 
     def test_recent_returns_last_n_in_order(self):
         history = History(self.path)

@@ -73,7 +73,7 @@ initial_prompt = ""
 # misses, and repairing after the fact leaves the raw transcript in the history
 # mangled and does nothing when clean-up is off.
 #
-# Changeable from the tray: Czyszczenie tekstu > Nazwy wlasne...
+# Changeable from the tray: Text clean-up > Proper nouns...
 # Example: "DeepSeek, Claude Code, Anthropic, Kubernetes, Terraform"
 #
 # Names shared across machines belong in vocabulary.txt in the repository
@@ -84,7 +84,7 @@ vocabulary = ""
 [audio]
 # Input device. null = whatever Windows considers the default input.
 #
-# Normally you pick this from the tray menu (Mikrofon), which writes the name
+# Normally you pick this from the tray menu (Microphone), which writes the name
 # here. Names, not indices: PortAudio renumbers devices whenever hardware is
 # added or removed, so an index saved today points somewhere else tomorrow.
 # A substring is enough ("Anker", "Yeti"). An integer index also works, but only
@@ -125,7 +125,7 @@ clipboard_history = false
 # and settles on "en" if that is neither Polish nor English. What lands here is
 # always a concrete value, never "auto", so you can see what the app chose;
 # a config written before this key existed gains it once, on the next start.
-# Change it from the tray menu -> Jezyk aplikacji / App language.
+# Change it from the tray menu -> App language.
 #
 # NOT the dictation language: that is [transcription].language, and the two are
 # deliberately independent - dictating in English through a Polish menu is a
@@ -141,8 +141,8 @@ sounds = true
 [history]
 # Append every transcription to %APPDATA%\WhisperDictateWin\history.jsonl
 #
-# This is also what "Skopiuj ostatnia transkrypcje" / "Copy last transcription"
-# in the tray reads - the way back when Ctrl+V went into a window with no text
+# This is also what "Copy last transcription" in the tray reads - the way back
+# when Ctrl+V went into a window with no text
 # field. Setting this to false hides that entry, because it would have nothing
 # to hand back.
 enabled = true
@@ -201,7 +201,7 @@ cli_path = ""
 # entry per provider:
 #   .\run.ps1 -SetApiKey anthropic
 #   .\run.ps1 -SetApiKey deepseek
-# (or the tray: Czyszczenie tekstu -> Klucz API: ...)
+# (or the tray: Text clean-up -> API key: ...)
 # ANTHROPIC_API_KEY / DEEPSEEK_API_KEY take precedence if set. Each provider
 # reads only its own, so one never shadows the other.
 

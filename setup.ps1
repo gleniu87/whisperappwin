@@ -36,38 +36,38 @@ function Write-Step($message) {
 
 # --- interpreter ------------------------------------------------------------
 
-Write-Step "Sprawdzam interpreter Pythona"
+Write-Step "Checking the Python interpreter"
 $pythonCmd = Get-Command $Python -ErrorAction SilentlyContinue
 if (-not $pythonCmd) {
-    throw "Nie znaleziono '$Python' w PATH. Zainstaluj Pythona 3.10+ albo podaj -Python <sciezka>."
+    throw "'$Python' not found in PATH. Install Python 3.10+ or pass -Python <path>."
 }
 $version = & $pythonCmd.Source -c "import sys; print('%d.%d' % sys.version_info[:2])"
 Write-Host "    $($pythonCmd.Source) (Python $version)"
 
 $major, $minor = $version.Split('.')
 if ([int]$major -lt 3 -or ([int]$major -eq 3 -and [int]$minor -lt 10)) {
-    throw "Wymagany Python 3.10 lub nowszy, znaleziono $version."
+    throw "Python 3.10 or newer is required, found $version."
 }
 
 # --- virtualenv -------------------------------------------------------------
 
 if (Test-Path $venvPython) {
-    Write-Step "Uzywam istniejacego venv: $venv"
+    Write-Step "Using the existing venv: $venv"
 } else {
-    Write-Step "Tworze venv: $venv"
+    Write-Step "Creating the venv: $venv"
     & $pythonCmd.Source -m venv $venv
-    if ($LASTEXITCODE -ne 0) { throw "Tworzenie venv nie powiodlo sie." }
+    if ($LASTEXITCODE -ne 0) { throw "Creating the venv failed." }
 }
 
-Write-Step "Aktualizuje pip"
+Write-Step "Upgrading pip"
 & $venvPython -m pip install --upgrade pip --quiet
-if ($LASTEXITCODE -ne 0) { throw "Aktualizacja pip nie powiodla sie." }
+if ($LASTEXITCODE -ne 0) { throw "Upgrading pip failed." }
 
 # --- dependencies -----------------------------------------------------------
 
-Write-Step "Instaluje zaleznosci podstawowe"
+Write-Step "Installing the base dependencies"
 & $venvPython -m pip install -r (Join-Path $root "requirements.txt")
-if ($LASTEXITCODE -ne 0) { throw "Instalacja zaleznosci nie powiodla sie." }
+if ($LASTEXITCODE -ne 0) { throw "Installing the dependencies failed." }
 
 # --- CUDA -------------------------------------------------------------------
 
@@ -76,32 +76,32 @@ if (-not $Cpu) {
     $gpus = Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match "NVIDIA" }
     if ($gpus) {
         $hasNvidia = $true
-        Write-Step "Wykryto GPU NVIDIA: $($gpus[0].Name)"
-        Write-Host "    Instaluje biblioteki CUDA (cuBLAS + cuDNN, ~600 MB)"
+        Write-Step "Detected an NVIDIA GPU: $($gpus[0].Name)"
+        Write-Host "    Installing the CUDA libraries (cuBLAS + cuDNN, ~600 MB)"
         & $venvPython -m pip install -r (Join-Path $root "requirements-cuda.txt")
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Instalacja bibliotek CUDA nie powiodla sie - aplikacja zadziala na CPU."
+            Write-Warning "Installing the CUDA libraries failed - the app will run on CPU."
         }
     } else {
-        Write-Step "Brak GPU NVIDIA - pomijam biblioteki CUDA"
+        Write-Step "No NVIDIA GPU - skipping the CUDA libraries"
     }
 } else {
-    Write-Step "Wymuszono tryb CPU (-Cpu) - pomijam biblioteki CUDA"
+    Write-Step "CPU mode forced (-Cpu) - skipping the CUDA libraries"
 }
 
 # --- verify -----------------------------------------------------------------
 
-Write-Step "Diagnostyka srodowiska"
+Write-Step "Environment diagnostics"
 & $venvPython -m whisperdictate --check
 $checkExit = $LASTEXITCODE
 
 Write-Host ""
 if ($checkExit -eq 0) {
-    Write-Host "Gotowe. Uruchom aplikacje: .\run.ps1" -ForegroundColor Green
+    Write-Host "Done. Start the app with: .\run.ps1" -ForegroundColor Green
     if (-not $hasNvidia -and -not $Cpu) {
-        Write-Host "Uwaga: dziala na CPU - transkrypcja bedzie kilkukrotnie wolniejsza." -ForegroundColor Yellow
+        Write-Host "Note: running on CPU - transcription will be several times slower." -ForegroundColor Yellow
     }
 } else {
-    Write-Warning "Diagnostyka zglosila problem - zobacz komunikaty powyzej."
+    Write-Warning "Diagnostics reported a problem - see the messages above."
 }
 exit $checkExit

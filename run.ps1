@@ -50,7 +50,7 @@ $venvPython = Join-Path $root ".venv\Scripts\python.exe"
 $venvPythonw = Join-Path $root ".venv\Scripts\pythonw.exe"
 
 if (-not (Test-Path $venvPython)) {
-    throw "Brak venv. Uruchom najpierw: .\setup.ps1"
+    throw "No venv. Run .\setup.ps1 first"
 }
 
 $appArgs = @("-m", "whisperdictate")
@@ -75,7 +75,7 @@ try {
     $isOneShot = $Check -or $ListDevices -or $Record -gt 0 -or $SetApiKey -or $Enhance -or $Benchmark -or $Quality -or $SuggestVocabulary -or $AddVocabulary
     if ($Hidden -and -not $isOneShot) {
         Start-Process -FilePath $venvPythonw -ArgumentList $appArgs -WindowStyle Hidden
-        Write-Host "WhisperDictate uruchomiony w tle. Ikona w zasobniku systemowym." -ForegroundColor Green
+        Write-Host "WhisperDictate started in the background. Look for the tray icon." -ForegroundColor Green
     } else {
         & $venvPython @appArgs
         exit $LASTEXITCODE

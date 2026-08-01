@@ -59,11 +59,11 @@ class SharedFileTest(unittest.TestCase):
         self.assertEqual(vocabulary.terms("A\nB, C\nD"), ("A", "B", "C", "D"))
 
     def test_comments_are_stripped(self):
-        raw = "# naglowek\nDeepSeek, Sonnet  # koniec linii\n# calkiem\nKubernetes"
+        raw = "# header\nDeepSeek, Sonnet  # end of line\n# a whole line\nKubernetes"
         self.assertEqual(vocabulary.terms(raw), ("DeepSeek", "Sonnet", "Kubernetes"))
 
     def test_a_comment_only_file_yields_nothing(self):
-        self.assertEqual(vocabulary.terms("# tylko komentarz\n\n"), ())
+        self.assertEqual(vocabulary.terms("# comment only\n\n"), ())
 
     def test_missing_file_is_not_an_error(self):
         """A vanished shared file must degrade to "no shared terms"."""
@@ -75,8 +75,8 @@ class SharedFileTest(unittest.TestCase):
 
     def test_combined_merges_both_sources(self):
         self.assertEqual(
-            vocabulary.combined("Klient Kowalski", "DeepSeek, Sonnet"),
-            "DeepSeek, Sonnet, Klient Kowalski",
+            vocabulary.combined("Client Smith", "DeepSeek, Sonnet"),
+            "DeepSeek, Sonnet, Client Smith",
         )
 
     def test_combined_deduplicates_across_sources(self):
@@ -85,13 +85,13 @@ class SharedFileTest(unittest.TestCase):
 
     def test_combined_works_with_either_side_empty(self):
         self.assertEqual(vocabulary.combined("", "DeepSeek"), "DeepSeek")
-        self.assertEqual(vocabulary.combined("Prywatna", ""), "Prywatna")
+        self.assertEqual(vocabulary.combined("Private", ""), "Private")
         self.assertEqual(vocabulary.combined("", ""), "")
 
     def test_the_repository_file_exists_and_parses(self):
         """The shipped vocabulary.txt must be readable, not just present."""
         shipped = vocabulary.read_shared()
-        self.assertTrue(shipped.strip(), "vocabulary.txt jest pusty")
+        self.assertTrue(shipped.strip(), "vocabulary.txt is empty")
         self.assertIn("DeepSeek", vocabulary.terms(shipped))
 
     def test_the_repository_file_carries_no_private_names(self):
@@ -110,14 +110,14 @@ class WhisperPrimingTest(unittest.TestCase):
 
     def test_existing_initial_prompt_is_kept_and_comes_first(self):
         """initial_prompt is the escape hatch; the list appends to it."""
-        result = vocabulary.whisper_priming("DeepSeek", "Mowie o programowaniu.")
-        self.assertEqual(result, "Mowie o programowaniu. DeepSeek.")
+        result = vocabulary.whisper_priming("DeepSeek", "I am talking about programming.")
+        self.assertEqual(result, "I am talking about programming. DeepSeek.")
 
     def test_initial_prompt_without_punctuation_gets_a_full_stop(self):
-        self.assertEqual(vocabulary.whisper_priming("A", "Kontekst"), "Kontekst. A.")
+        self.assertEqual(vocabulary.whisper_priming("A", "Context"), "Context. A.")
 
     def test_initial_prompt_alone_still_works(self):
-        self.assertEqual(vocabulary.whisper_priming("", "Kontekst."), "Kontekst.")
+        self.assertEqual(vocabulary.whisper_priming("", "Context."), "Context.")
 
     def test_both_empty_gives_empty(self):
         self.assertEqual(vocabulary.whisper_priming("", ""), "")
@@ -233,7 +233,7 @@ class PendingTest(unittest.TestCase):
         self.assertEqual(vocabulary.pending(self.ENTRIES, "DeepSeek", ""), [])
 
     def test_entries_without_cleanup_are_skipped(self):
-        self.assertEqual(vocabulary.pending([{"text": "Cokolwiek"}], "", ""), [])
+        self.assertEqual(vocabulary.pending([{"text": "Anything"}], "", ""), [])
 
     def test_empty_history_gives_nothing(self):
         self.assertEqual(vocabulary.pending([], "", ""), [])
@@ -347,7 +347,7 @@ class RemoveTest(unittest.TestCase):
     def test_removing_from_the_private_list_cannot_touch_the_shared_one(self):
         """Only the config half is editable from the tray; vocabulary.txt is
         version-controlled and a dialog must not produce a git diff."""
-        self.assertEqual(vocabulary.remove("Prywatna", "Anthropic"), "Prywatna")
+        self.assertEqual(vocabulary.remove("Private", "Anthropic"), "Private")
         self.assertIn("Anthropic", vocabulary.terms(vocabulary.read_shared()))
 
 

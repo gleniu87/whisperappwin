@@ -146,7 +146,7 @@ class HotkeyListener:
         name = str(key or "").lower()
         if name not in TRIGGERS:
             log.warning(
-                "Nieznany klawisz %r - uzywam %s. Dostepne: %s",
+                "Unknown key %r - using %s. Available: %s",
                 key, DEFAULT_KEY, ", ".join(sorted(TRIGGERS)),
             )
             return False
@@ -254,7 +254,7 @@ class HotkeyListener:
             self._recording = False
         self._cancel_timer()
         if was_recording:
-            log.debug("Nagrywanie anulowane - wcisnieto inny klawisz")
+            log.debug("Recording cancelled - another key was pressed")
             self._safe(self._on_cancel)
 
     # -- helpers --------------------------------------------------------
@@ -270,4 +270,4 @@ class HotkeyListener:
         try:
             callback()
         except Exception:  # noqa: BLE001
-            log.exception("Blad w callbacku hotkey")
+            log.exception("Error in the hotkey callback")

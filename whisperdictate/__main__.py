@@ -83,7 +83,7 @@ def acquire_single_instance() -> object | None:
             return None
         return handle
     except ImportError:  # pragma: no cover - pywin32 missing
-        log.warning("pywin32 niedostepny - pomijam kontrole pojedynczej instancji")
+        log.warning("pywin32 unavailable - skipping the single-instance check")
         return object()
 
 
@@ -117,10 +117,10 @@ def build_recorder(config: Config) -> Recorder:
 def cmd_list_devices(*, all_host_apis: bool = False) -> int:
     devices = list_input_devices(all_host_apis=all_host_apis)
     if not devices:
-        print("Nie znaleziono zadnego urzadzenia wejsciowego audio.")
+        print("No audio input device found.")
         return 1
 
-    print("Dostepne mikrofony:")
+    print("Available microphones:")
     for device in devices:
         print(f"  {device}")
 
@@ -128,9 +128,9 @@ def cmd_list_devices(*, all_host_apis: bool = False) -> int:
         total = len(list_input_devices(all_host_apis=True))
         hidden = total - len(devices)
         if hidden > 0:
-            print(f"\nUkryto {hidden} duplikatow z MME/DirectSound/WDM-KS. Pelna lista: --list-devices --all")
+            print(f"\nHid {hidden} duplicate(s) from MME/DirectSound/WDM-KS. Full list: --list-devices --all")
 
-    print("\nWybierz mikrofon z menu tray, albo wpisz nazwe jako audio.device w config.toml.")
+    print("\nPick a microphone from the tray menu, or put its name in audio.device in config.toml.")
     return 0
 
 
@@ -141,27 +141,27 @@ def cmd_check(config: Config) -> int:
     print(f"  Python           {sys.version.split()[0]}")
     print(f"  Config           {paths.config_path()}")
     print(f"  Log              {paths.log_path()}")
-    print(f"  Cache modeli     {paths.model_cache_dir()}")
+    print(f"  Model cache      {paths.model_cache_dir()}")
 
     dll_dirs = runtime_cuda.enable_cuda_dlls()
-    print(f"  Biblioteki CUDA  {len(dll_dirs)} katalog(ow) dodanych do sciezki DLL")
+    print(f"  CUDA libraries   {len(dll_dirs)} directory(ies) added to the DLL search path")
 
     try:
         import ctranslate2
 
         count = ctranslate2.get_cuda_device_count()
-        print(f"  CTranslate2      {ctranslate2.__version__}, widoczne GPU: {count}")
+        print(f"  CTranslate2      {ctranslate2.__version__}, GPUs visible: {count}")
     except Exception as exc:  # noqa: BLE001
-        print(f"  CTranslate2      NIEDOSTEPNY ({exc})")
+        print(f"  CTranslate2      UNAVAILABLE ({exc})")
         return 1
 
     devices = list_input_devices()
-    print(f"  Mikrofony        {len(devices)}")
+    print(f"  Microphones      {len(devices)}")
     for device in devices[:5]:
         print(f"                   {device}")
 
     key = config.get("hotkey.key", DEFAULT_KEY)
-    known = "OK" if key in TRIGGERS else f"NIEZNANY (dostepne: {', '.join(sorted(TRIGGERS))})"
+    known = "OK" if key in TRIGGERS else f"UNKNOWN (available: {', '.join(sorted(TRIGGERS))})"
     print(f"  Hotkey           {key} / {config.get('hotkey.mode')} - {known}")
 
     from .enhance import PROVIDERS as PROVIDER_SPECS
@@ -169,23 +169,23 @@ def cmd_check(config: Config) -> int:
 
     enhancement = EnhancementService(config)
     problem = enhancement.check()
-    status = "OK" if problem is None else f"NIEGOTOWE ({problem})"
-    print(f"  Czyszczenie      {enhancement.describe()} - {status}")
+    status = "OK" if problem is None else f"NOT READY ({problem})"
+    print(f"  Clean-up         {enhancement.describe()} - {status}")
     for key, provider_spec in PROVIDER_SPECS.items():
         if provider_spec.env_var is None:
             continue
-        print(f"    klucz {key:<10} {credentials.describe_source(key)}"
+        print(f"    key {key:<12} {credentials.describe_source(key)}"
               f"  ->  {registry.hosting(key)}")
 
-    print("\nLaduje model (przy pierwszym uruchomieniu pobiera ~1.6 GB)...")
+    print("\nLoading the model (the first run downloads ~1.6 GB)...")
     transcriber = build_transcriber(config)
     try:
         transcriber.ensure_loaded()
     except TranscriptionError as exc:
-        print(f"  BLAD: {exc}")
+        print(f"  ERROR: {exc}")
         return 1
     print(f"  Model            {transcriber.description}")
-    print("\nWszystko gotowe.")
+    print("\nAll set.")
     return 0
 
 
@@ -194,11 +194,11 @@ def cmd_record(config: Config, seconds: float) -> int:
     import time
 
     transcriber = build_transcriber(config)
-    print("Laduje model...")
+    print("Loading the model...")
     try:
         transcriber.ensure_loaded()
     except TranscriptionError as exc:
-        print(f"BLAD: {exc}")
+        print(f"ERROR: {exc}")
         return 1
     print(f"Model: {transcriber.description}")
 
@@ -206,14 +206,14 @@ def cmd_record(config: Config, seconds: float) -> int:
     try:
         recorder.start()
     except AudioError as exc:
-        print(f"BLAD: {exc}")
+        print(f"ERROR: {exc}")
         return 1
     if recorder.fallback_note:
-        print(f"UWAGA: {recorder.fallback_note}")
+        print(f"NOTE: {recorder.fallback_note}")
 
-    device = config.get("audio.device") or "domyslny systemowy"
-    print(f"Mikrofon: {device}")
-    print(f"Mow teraz - nagrywam {seconds:.0f} s...")
+    device = config.get("audio.device") or "system default"
+    print(f"Microphone: {device}")
+    print(f"Speak now - recording {seconds:.0f} s...")
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         time.sleep(0.1)
@@ -223,15 +223,15 @@ def cmd_record(config: Config, seconds: float) -> int:
     print()
 
     if audio is None or audio.size == 0:
-        print("Nie zarejestrowano dzwieku.")
+        print("No audio was captured.")
         return 1
 
     language = config.get("transcription.language", "pl")
     result = transcriber.transcribe(audio, language)
-    print(f"\nJezyk: {result.language} ({result.language_probability:.2f})")
-    print(f"Czas:  {result.elapsed_seconds:.2f} s dla {result.audio_seconds:.1f} s audio "
+    print(f"\nLanguage: {result.language} ({result.language_probability:.2f})")
+    print(f"Time:     {result.elapsed_seconds:.2f} s for {result.audio_seconds:.1f} s of audio "
           f"({result.speedup:.0f}x realtime)")
-    print(f"\nTekst: {result.text!r}")
+    print(f"\nText: {result.text!r}")
     return 0
 
 
@@ -244,13 +244,13 @@ def cmd_set_api_key(provider: str) -> int:
 
     if provider not in PROVIDER_SPECS or PROVIDER_SPECS[provider].env_var is None:
         keyed = [k for k, s in PROVIDER_SPECS.items() if s.env_var]
-        print(f"Nieznany provider {provider!r}. Dostepne: {', '.join(keyed)}")
+        print(f"Unknown provider {provider!r}. Available: {', '.join(keyed)}")
         return 1
 
-    print(f"Provider:  {registry.label_with_hint(provider)}")
-    print(f"Ruch idzie do: {registry.hosting(provider)}")
-    print("Klucz zostanie zapisany w Menedzerze polswiadczen Windows.")
-    print("Nie trafi do pliku konfiguracyjnego ani do logow.\n")
+    print(f"Provider:     {registry.label_with_hint(provider)}")
+    print(f"Traffic goes to: {registry.hosting(provider)}")
+    print("The key will be stored in the Windows Credential Manager.")
+    print("It will not reach the config file or the log.\n")
 
     # Piped input wins over the interactive prompt. getpass needs a real Windows
     # console; under Git Bash or an MSYS pty it falls back to an echoing read,
@@ -258,27 +258,27 @@ def cmd_set_api_key(provider: str) -> int:
     if not sys.stdin.isatty():
         key = sys.stdin.readline()
         if not key.strip():
-            print("BLAD: nic nie przyszlo na stdin.")
+            print("ERROR: nothing arrived on stdin.")
             return 1
     else:
         try:
-            key = getpass.getpass("Klucz: ")
+            key = getpass.getpass("Key: ")
         except (EOFError, KeyboardInterrupt):
-            print("\nPrzerwano.")
+            print("\nAborted.")
             return 1
         except Exception as exc:  # noqa: BLE001 - getpass raises GetPassWarning-adjacent errors
-            print(f"BLAD: nie moge bezpiecznie odczytac klucza ({exc}).")
-            print("Podaj go przez potok, np.:")
-            print(f'  Read-Host "Klucz" -AsSecureString | ... | python -m whisperdictate '
+            print(f"ERROR: cannot read the key safely ({exc}).")
+            print("Pipe it in instead, for example:")
+            print(f'  Read-Host "Key" -AsSecureString | ... | python -m whisperdictate '
                   f"--set-api-key {provider}")
             return 1
 
     try:
         credentials.set_api_key(provider, key)
     except (ValueError, OSError) as exc:
-        print(f"BLAD: {exc}")
+        print(f"ERROR: {exc}")
         return 1
-    print(f"\nZapisano ({provider}). Wlacz czyszczenie w menu tray.")
+    print(f"\nStored ({provider}). Switch clean-up on from the tray menu.")
     return 0
 
 
@@ -301,23 +301,23 @@ def cmd_enhance(config: Config, text: str, provider: str | None) -> int:
 
     problem = service.check()
     if problem:
-        print(f"BLAD: {problem}")
+        print(f"ERROR: {problem}")
         return 1
 
     print(f"Provider: {service.provider_name} / {service.model}")
-    print(f"Styl:     {config.get('enhancement.prompt')}\n")
-    print(f"Przed ({len(text)} znakow):\n  {text}\n")
+    print(f"Style:    {config.get('enhancement.prompt')}\n")
+    print(f"Before ({len(text)} characters):\n  {text}\n")
 
     result = service.enhance(text, language)
     if result is None:
-        print("Czyszczenie nie powiodlo sie - w aplikacji wkleilby sie surowy tekst.")
-        print("Szczegoly w logu: " + str(paths.log_path()))
+        print("Clean-up failed - in the app the raw text would have been pasted.")
+        print("Details in the log: " + str(paths.log_path()))
         return 1
     if not result.text:
-        print("Wynik: EMPTY - model uznal to za sam szum, nic nie zostaloby wklejone.")
+        print("Result: EMPTY - the model judged this pure noise, nothing would be pasted.")
         return 0
 
-    print(f"Po ({len(result.text)} znakow, {result.elapsed_seconds:.2f} s):\n  {result.text}")
+    print(f"After ({len(result.text)} characters, {result.elapsed_seconds:.2f} s):\n  {result.text}")
     return 0
 
 
@@ -331,7 +331,7 @@ def cmd_benchmark(config: Config, text: str) -> int:
     from .enhance import registry
 
     language = _prepare_for_enhance(config, None)
-    print(f"Tekst wejsciowy ({len(text)} znakow):\n  {text}\n")
+    print(f"Input text ({len(text)} characters):\n  {text}\n")
 
     rows = []
     for key, provider_spec in PROVIDER_SPECS.items():
@@ -342,13 +342,13 @@ def cmd_benchmark(config: Config, text: str) -> int:
 
             problem = service.check()
             if problem:
-                print(f"--- {key} / {model}: POMINIETO ({problem})")
+                print(f"--- {key} / {model}: SKIPPED ({problem})")
                 continue
 
             print(f"--- {key} / {model}  [{registry.hosting(key)}]")
             result = service.enhance(text, language)
             if result is None:
-                print("    NIEUDANE (szczegoly w logu)\n")
+                print("    FAILED (details in the log)\n")
                 rows.append((key, model, None, None))
                 continue
             print(f"    {result.elapsed_seconds:6.2f} s  ->  {result.text}\n")
@@ -356,11 +356,11 @@ def cmd_benchmark(config: Config, text: str) -> int:
 
     ok = [r for r in rows if r[2] is not None]
     if not ok:
-        print("Zaden provider nie odpowiedzial.")
+        print("No provider answered.")
         return 1
 
-    print("Podsumowanie (posortowane po czasie):")
-    print(f"  {'provider/model':<34} {'czas':>8} {'znakow':>8}")
+    print("Summary (sorted by time):")
+    print(f"  {'provider/model':<34} {'time':>8} {'chars':>8}")
     for key, model, elapsed, length in sorted(ok, key=lambda r: r[2]):
         print(f"  {key + '/' + model:<34} {elapsed:>7.2f}s {length:>8}")
     return 0
@@ -382,23 +382,23 @@ def cmd_suggest_vocabulary(config: Config) -> int:
     found = vocabulary.pending(entries, known, config.get("transcription.vocabulary_rejected", ""))
 
     paired = sum(1 for e in entries if e.get("raw_text"))
-    print(f"Przejrzano {len(entries)} wpisow historii ({paired} z czyszczeniem).")
+    print(f"Reviewed {len(entries)} history entries ({paired} with clean-up).")
     if shared.strip():
-        print(f"Wspolne ({vocabulary.SHARED_FILE}): {', '.join(vocabulary.terms(shared))}")
+        print(f"Shared ({vocabulary.SHARED_FILE}): {', '.join(vocabulary.terms(shared))}")
     if private:
-        print(f"Prywatne (config): {', '.join(vocabulary.terms(private))}")
+        print(f"Private (config): {', '.join(vocabulary.terms(private))}")
 
     if not found:
-        print("\nBrak nowych kandydatow.")
-        print("Kandydat powstaje, gdy model czyszczacy sam poprawi przekrecona nazwe.")
+        print("\nNo new candidates.")
+        print("A candidate appears when the clean-up model repairs a mangled name on its own.")
         return 0
 
-    print(f"\nKandydaci ({len(found)}):")
+    print(f"\nCandidates ({len(found)}):")
     for item in found:
-        print(f"  {item.corrected:<24} <- Whisper uslyszal {item.heard!r}")
+        print(f"  {item.corrected:<24} <- Whisper heard {item.heard!r}")
 
     proposed = ", ".join(i.corrected for i in found)
-    print("\nDopisz te, ktore sa nazwami wlasnymi (w formie podstawowej):")
+    print("\nAdd the ones that are proper nouns (in their base form):")
     print(f'  .\\run.ps1 -AddVocabulary "{proposed}"')
     return 0
 
@@ -412,9 +412,9 @@ def cmd_add_vocabulary(config: Config, raw: str) -> int:
     config.set("transcription.vocabulary", updated)
 
     added = [t for t in vocabulary.terms(updated) if t not in vocabulary.terms(before)]
-    print(f"Dopisano {len(added)}: {', '.join(added)}" if added else "Nic nowego do dopisania.")
-    print(f"Slownik ({len(vocabulary.terms(updated))}): {updated}")
-    print("\nDziala od nastepnego uruchomienia aplikacji (albo od razu, jesli zmienisz w tray).")
+    print(f"Added {len(added)}: {', '.join(added)}" if added else "Nothing new to add.")
+    print(f"Vocabulary ({len(vocabulary.terms(updated))}): {updated}")
+    print("\nTakes effect on the next app start (or immediately, if you change it from the tray).")
     return 0
 
 
@@ -447,25 +447,25 @@ def cmd_quality(config: Config, provider_filter: str | None) -> int:
         config.set("enhancement.model", model, save=False)
         problem = EnhancementService(config).check()
         if problem:
-            print(f"POMINIETO {key} / {model}: {problem}")
+            print(f"SKIPPED {key} / {model}: {problem}")
             continue
         combos.append((key, model, provider_spec))
 
     if not combos:
-        print("Zaden provider nie jest gotowy.")
+        print("No provider is ready.")
         return 1
 
-    print(f"\n{len(quality.CASES)} przypadkow x {len(combos)} modeli. "
-          f"Sprawdzam tylko bledy mechaniczne - styl ocen sam.\n")
+    print(f"\n{len(quality.CASES)} cases x {len(combos)} models. "
+          f"Only mechanical errors are checked - judge the style yourself.\n")
 
     results: dict[tuple[str, str], list] = {c[:2]: [] for c in combos}
 
     for case in quality.CASES:
         print("=" * 78)
         print(f"[{case.name}] {case.why}")
-        print(f"  WEJSCIE: {case.text}")
+        print(f"  INPUT: {case.text}")
         if case.expect_empty:
-            print("  OCZEKIWANE: EMPTY (nic do wklejenia)")
+            print("  EXPECTED: EMPTY (nothing to paste)")
 
         for key, model, _ in combos:
             config.set("enhancement.provider", key, save=False)
@@ -487,8 +487,8 @@ def cmd_quality(config: Config, provider_filter: str | None) -> int:
         print()
 
     print("=" * 78)
-    print("Podsumowanie - im mniej bledow, tym lepiej:\n")
-    print(f"  {'provider/model':<34} {'OK':>4} {'BLAD':>6} {'sr. czas':>10}")
+    print("Summary - fewer errors is better:\n")
+    print(f"  {'provider/model':<34} {'OK':>4} {'FAIL':>6} {'avg time':>10}")
     ranked = sorted(
         results.items(),
         key=lambda item: (sum(r.failed for r in item[1]), sum(r.elapsed for r in item[1])),
@@ -498,7 +498,7 @@ def cmd_quality(config: Config, provider_filter: str | None) -> int:
         avg = sum(r.elapsed for r in outcomes) / len(outcomes)
         print(f"  {key + '/' + model:<34} {len(outcomes) - bad:>4} {bad:>6} {avg:>9.2f}s")
 
-    print("\nSzczegoly bledow:")
+    print("\nError details:")
     clean_sweep = True
     for (key, model), outcomes in ranked:
         for outcome in outcomes:
@@ -507,7 +507,7 @@ def cmd_quality(config: Config, provider_filter: str | None) -> int:
                 print(f"  {key}/{model} [{outcome.case.name}]: "
                       + "; ".join(outcome.violations))
     if clean_sweep:
-        print("  brak - wszystkie modele przeszly wszystkie przypadki")
+        print("  none - every model passed every case")
     return 0
 
 
@@ -517,7 +517,7 @@ def cmd_quality(config: Config, provider_filter: str | None) -> int:
 def run_app(config: Config) -> int:
     mutex = acquire_single_instance()
     if mutex is None:
-        log.error("%s juz dziala (sprawdz zasobnik systemowy)", APP_NAME)
+        log.error("%s is already running (check the system tray)", APP_NAME)
         return 1
 
     recorder = build_recorder(config)
@@ -581,7 +581,7 @@ def run_app(config: Config) -> int:
     controller.preload()
 
     log.info(
-        "%s %s uruchomiony. Przytrzymaj %s aby dyktowac (jezyk: %s).",
+        "%s %s started. Hold %s to dictate (language: %s).",
         APP_NAME, __version__, config.get("hotkey.key"), config.get("transcription.language"),
     )
 
@@ -602,7 +602,7 @@ def run_app(config: Config) -> int:
             root.destroy()
         except tk.TclError:
             pass
-        log.info("Zakonczono.")
+        log.info("Shut down.")
     return 0
 
 
@@ -612,53 +612,68 @@ def run_app(config: Config) -> int:
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="whisperdictate",
-        description="Lokalne dyktowanie hold-to-talk dla Windows (faster-whisper).",
+        description="Local hold-to-talk dictation for Windows (faster-whisper).",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("-v", "--verbose", action="store_true", help="logowanie DEBUG")
-    parser.add_argument("--list-devices", action="store_true", help="wypisz mikrofony i zakoncz")
+    parser.add_argument("-v", "--verbose", action="store_true", help="DEBUG logging")
+    parser.add_argument("--list-devices", action="store_true", help="list microphones and exit")
     parser.add_argument(
         "--all", action="store_true",
-        help="z --list-devices: pokaz tez duplikaty z MME/DirectSound/WDM-KS",
+        help="with --list-devices: also show MME/DirectSound/WDM-KS duplicates",
     )
-    parser.add_argument("--check", action="store_true", help="diagnostyka srodowiska (CUDA, audio, model)")
+    parser.add_argument("--check", action="store_true", help="environment diagnostics (CUDA, audio, model)")
     parser.add_argument(
-        "--record", type=float, metavar="SEKUNDY",
-        help="nagraj N sekund, wypisz transkrypcje i zakoncz (test bez hotkeya)",
+        "--record", type=float, metavar="SECONDS",
+        help="record N seconds, print the transcript and exit (a test without the hotkey)",
     )
     parser.add_argument(
-        "--device", metavar="NAZWA",
-        help="z --record: uzyj tego mikrofonu zamiast tego z konfiguracji",
+        "--device", metavar="NAME",
+        help="with --record: use this microphone instead of the configured one",
     )
     parser.add_argument(
         "--set-api-key", metavar="PROVIDER", nargs="?", const="anthropic",
-        help="zapisz klucz API w Menedzerze polswiadczen (anthropic | deepseek)",
+        help="store an API key in the Credential Manager (anthropic | deepseek)",
     )
     parser.add_argument(
-        "--enhance", metavar="TEKST",
-        help="przepusc tekst przez warstwe czyszczaca i wypisz wynik",
+        "--enhance", metavar="TEXT",
+        help="run text through the clean-up layer and print the result",
     )
     parser.add_argument(
-        "--provider", metavar="NAZWA",
-        help="z --enhance: uzyj tego providera zamiast tego z konfiguracji",
+        "--provider", metavar="NAME",
+        help="with --enhance: use this provider instead of the configured one",
     )
     parser.add_argument(
-        "--benchmark", metavar="TEKST",
-        help="porownaj wszystkich gotowych providerow na tym samym tekscie",
+        "--benchmark", metavar="TEXT",
+        help="compare every ready provider on the same text",
     )
     parser.add_argument(
         "--quality", action="store_true",
-        help="porownanie jakosciowe na stalym zestawie trudnych transkrypcji",
+        help="quality comparison over a fixed set of difficult transcripts",
     )
     parser.add_argument(
         "--suggest-vocabulary", action="store_true",
-        help="wypisz nazwy wlasne, ktore model czyszczacy poprawil sam",
+        help="list proper nouns the clean-up model repaired on its own",
     )
     parser.add_argument(
-        "--add-vocabulary", metavar="NAZWY",
-        help="dopisz nazwy (po przecinku) do slownika",
+        "--add-vocabulary", metavar="NAMES",
+        help="add names (comma-separated) to the vocabulary",
     )
     return parser.parse_args(argv)
+
+
+def _is_one_shot(args: argparse.Namespace) -> bool:
+    """Whether this invocation prints to a terminal and exits, rather than starting the app."""
+    return bool(
+        args.set_api_key
+        or args.enhance is not None
+        or args.benchmark is not None
+        or args.quality
+        or args.suggest_vocabulary
+        or args.add_vocabulary is not None
+        or args.list_devices
+        or args.check
+        or args.record is not None
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -668,7 +683,13 @@ def main(argv: list[str] | None = None) -> int:
     # Before anything can produce a user-facing string. Config.load has already
     # resolved "which language" - including detecting it from Windows on a first
     # run - so this only puts the answer into force.
-    i18n.use(config.get("ui.language"))
+    #
+    # The one-shot commands force English instead. Their output is CLI output, and
+    # CLI output is English by decision (docs/HANDOFF.md) - but a few of the values
+    # they print come from helpers shared with the GUI (`credentials.describe_source`,
+    # `registry.hosting`), which do go through the catalogue. Without this, --check
+    # printed Polish sentences into otherwise English output.
+    i18n.use(i18n.FALLBACK if _is_one_shot(args) else config.get("ui.language"))
 
     if args.set_api_key:
         return cmd_set_api_key(args.set_api_key)

@@ -1,0 +1,11 @@
+# Core runtime dependencies (CPU-capable on their own).
+# For GPU acceleration also install requirements-cuda.txt.
+
+faster-whisper>=1.1.0
+sounddevice>=0.4.6
+numpy>=1.26,<3
+pynput>=1.7.7
+pystray>=0.19.5
+Pillow>=10.0.0
+pywin32>=306
+tomli-w>=1.0.0

@@ -1,0 +1,98 @@
+# WhisperDictate for Windows - configuration reference
+#
+# The live config lives at %APPDATA%\WhisperDictateWin\config.toml and is created
+# from these defaults on first run. This file is documentation only; editing it
+# changes nothing at runtime.
+#
+# The app rewrites the live config when you change a setting from the tray menu,
+# so hand-written comments in it will not survive. Keep your notes here instead.
+
+[hotkey]
+# Which key starts dictation. Accepted: "alt_r" (right Alt / AltGr), "alt_l",
+# "ctrl_r", "f9", "f10"..."f12", "scroll_lock", "pause".
+key = "alt_r"
+
+# "hold"   - record while held, transcribe on release (like the macOS original)
+# "toggle" - press once to start, press again to stop
+mode = "hold"
+
+# Hold mode only. The key must be held this long before recording starts.
+# This is what keeps AltGr usable for typing Polish characters: a quick
+# AltGr+a still produces "a", only a deliberate hold starts dictation.
+hold_threshold_ms = 300
+
+# Hold mode only. If you press a normal key while the trigger is held, the
+# gesture is treated as an AltGr combination and dictation is cancelled.
+# Modifier keys (Ctrl/Shift/Alt) never cancel - Windows emits a synthetic
+# left-Ctrl alongside AltGr, so cancelling on those would break the trigger.
+cancel_on_other_key = true
+
+[transcription]
+# faster-whisper model id. Matches the macOS original's default.
+# Options: "tiny", "base", "small", "medium", "large-v2", "large-v3",
+#          "large-v3-turbo", "distil-large-v3.5", or a path to a local CT2 dir.
+model = "large-v3-turbo"
+
+# "pl", "en", or "auto". The original defaults to "pl" and always passes an
+# explicit language, because Whisper's own default ("en") force-translates
+# non-English speech instead of transcribing it.
+language = "pl"
+
+# "auto" picks CUDA when the runtime libraries load, otherwise CPU.
+# Force with "cuda" or "cpu".
+device = "auto"
+
+# "auto" resolves to float16 on CUDA and int8 on CPU.
+# Other values: "float32", "float16", "int8_float16", "int8".
+compute_type = "auto"
+
+beam_size = 5
+
+# Silero VAD drops silent stretches before decoding. Strongly recommended:
+# it is the single most effective guard against Whisper hallucinating
+# ("Napisy stworzone przez spolecznosc Amara.org") on near-silent input.
+vad_filter = true
+
+# Optional priming text. Nudges spelling of names and jargon you use often.
+# Example: "Kubernetes, Terraform, ICE InsureTech, Tomasz Glen."
+initial_prompt = ""
+
+[audio]
+# Input device. null = Windows default. Use a substring of the device name
+# ("Yeti", "Realtek") or a numeric index from `python -m whisperdictate --list-devices`.
+device = null
+
+# Recordings shorter than this are discarded as accidental key taps.
+min_seconds = 0.4
+
+# Hard cap on a single dictation, to bound memory use.
+max_seconds = 300.0
+
+[output]
+# Put the text on the clipboard and send Ctrl+V to the focused window.
+auto_paste = true
+
+# Restore whatever was on the clipboard before the paste.
+restore_clipboard = true
+
+# Delay between setting the clipboard and sending Ctrl+V. Raise it if a slow
+# app (Teams, some Electron editors) occasionally pastes stale content.
+paste_delay_ms = 120
+
+[ui]
+# Floating always-on-top recording indicator.
+overlay = true
+
+# Short beeps on start / success / error.
+sounds = true
+
+[history]
+# Append every transcription to %APPDATA%\WhisperDictateWin\history.jsonl
+enabled = true
+max_entries = 5000
+
+# Literal find-and-replace applied to the transcript before pasting.
+# Case-insensitive; alphanumeric keys match on word boundaries only.
+[replacements]
+# "kubernetes" = "Kubernetes"
+# "ajs insure tech" = "ICE InsureTech"

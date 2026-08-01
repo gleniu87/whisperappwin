@@ -1,0 +1,10 @@
+# GPU acceleration for CTranslate2 (the engine behind faster-whisper).
+#
+# CTranslate2 >= 4.5 links against cuBLAS 12 and cuDNN 9. Rather than requiring a
+# system-wide CUDA Toolkit install, we pull the DLLs in as pip wheels; the app adds
+# their directories to the DLL search path at startup (see runtime_cuda.py).
+#
+# Install with:  pip install -r requirements-cuda.txt
+
+nvidia-cublas-cu12>=12.4
+nvidia-cudnn-cu12>=9.1,<10

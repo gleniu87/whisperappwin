@@ -112,11 +112,11 @@ identyfikatorów, ścieżek, flag CLI ani `camelCase`.
 
 | | Anthropic API | DeepSeek API | Claude Code CLI |
 |---|---|---|---|
-| Model domyślny | `claude-haiku-4-5` | `deepseek-v4-flash` | `claude-haiku-4-5` |
+| Model domyślny | `claude-haiku-4-5` | `deepseek-v4-flash` | `claude-sonnet-5` |
 | Input / 1M | $1.00 | **$0.14** | — |
 | Output / 1M | $5.00 | **$0.28** | — |
 | Koszt / dyktowanie | ~$0.0026 | ~$0.00025 | subskrypcja |
-| Czas | ~1 s | zmierz sam | **~23 s** (zmierzone) |
+| Czas | ~1 s (nie mierzone) | **~1,5 s** (zmierzone z PL) | **~5 s** (zmierzone) |
 | Klucz API | wymagany | wymagany | **niepotrzebny** |
 | Ruch idzie do | Anthropic (USA) | **DeepSeek (Chiny)** | Anthropic (Twoja subskrypcja) |
 
@@ -125,6 +125,15 @@ DeepSeek jest ~10× tańszy i mówi protokołem Anthropic Messages pod innym
 minimalny cache'owalny prefiks Anthropic dla Haiku 4.5 to 4096 tokenów, a nasz
 prompt systemowy ma ~1100 — czyli u Anthropic **cache w ogóle nie zadziała**,
 a DeepSeek cache'uje automatycznie bez progu.
+
+Opóźnienie DeepSeeka z Polski wyszło ~1,5 s dla obu modeli — czyli cena nie jest
+tu kompromisem za czekanie. Polszczyzna na teście z przerywnikami, autopoprawką
+i identyfikatorem `user_id` wypadła poprawnie: `user_id` nietknięty.
+
+**Przez Claude Code CLI wybieraj Sonneta, nie Haiku.** Wbrew intuicji: w pięciu
+przebiegach tego samego tekstu haiku-4-5 zajmował 19,8–60+ s (dwa razy przekroczył
+limit czasu), a sonnet-5 trzymał się 4,2–5,7 s. Narzut CLI dominuje nad szybkością
+samego modelu. Dlatego domyślnym modelem CLI jest Sonnet.
 
 **Zanim włączysz DeepSeeka: ruch idzie na serwery w Chinach.** Do treści
 służbowych używaj Claude Code CLI (idzie przez Twoją subskrypcję) albo wyłącz
@@ -138,6 +147,42 @@ Nie zgaduj, który jest najlepszy — zmierz na swoim tekście:
 
 Przepuszcza ten sam tekst przez każdego gotowego providera i wypisuje czasy oraz
 wyniki obok siebie.
+
+### Porównanie jakościowe
+
+Szybkość to połowa pytania. Druga połowa brzmi „czy mogę mu zaufać z moim
+tekstem" — i odpowiada na nią:
+
+```powershell
+.\run.ps1 -Quality                      # wszyscy gotowi providerzy
+.\run.ps1 -Quality -Provider deepseek   # tylko jeden
+```
+
+Przepuszcza stały zestaw trudnych transkrypcji (identyfikatory, `camelCase`,
+ścieżki, autopoprawki, „nie" jako kontrast, halucynacje Whispera na ciszy,
+transkrypcja będąca poleceniem) i sprawdza **błędy mechaniczne**: zgubiony
+identyfikator, zostawiony przerywnik, model odpowiadający zamiast czyścić.
+Styl oceniasz sam — tego nie da się zmierzyć.
+
+Zestaw jest też testem regresyjnym promptu: zmień `prompts.py` albo model,
+uruchom ponownie i zobacz, co się zepsuło. Przypadki są w
+`whisperdictate/enhance/quality.py`, każdy z uzasadnieniem, po co istnieje.
+
+Zmierzone (12 przypadków, jeden przebieg):
+
+| | Błędy | Śr. czas |
+|---|---|---|
+| `deepseek-v4-pro` | 0 / 12 | 1,54 s |
+| `deepseek-v4-flash` | 0 / 12 | 1,60 s |
+| `claude_cli` + `claude-haiku-4-5` | 0 / 12 | 20,9 s |
+| `claude_cli` + `claude-sonnet-5` | 1 / 12 | 4,25 s |
+
+Jeden przebieg nie wystarcza — te modele nie są deterministyczne. Na powtórzeniu
+×5 najtrudniejszych przypadków **Pro okazał się wyraźnie spójniejszy niż Flash**
+przy tym samym czasie: Flash zwrócił nazwę własną w trzech różnych formach
+(`DeepSick`, `Deepsika`, `DeepSeeka`) i raz zamienił znaczące „jakby" na
+„jakieś"; Pro dał pięć razy ten sam wynik. Jeśli zależy Ci na powtarzalności,
+Pro nie kosztuje tu czasu — tylko tokeny.
 
 ### Klucze API
 

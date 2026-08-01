@@ -1,4 +1,4 @@
-# Handoff — stan na 2026-08-01
+# Handoff — stan na 2026-08-01 (sesja 2)
 
 Notatka przekazania między sesjami. `README.md` opisuje, jak używać;
 `docs/ARCHITECTURE.md` — dlaczego kod wygląda tak, a nie inaczej. Ten plik mówi,
@@ -32,38 +32,50 @@ odtwarzaniem kolejnej funkcji.
 | Sprzęt | i7-12700H, 64 GB RAM, RTX 3070 Ti Laptop (8 GB VRAM) |
 | GPU | działa: `large-v3-turbo @ cuda/float16`, ~29× realtime |
 | Mikrofon | `audio.device = "Mikrofon (Anker PowerConf C200)"` |
-| Testy | **162, wszystkie przechodzą** — `.\.venv\Scripts\python.exe -m unittest discover -s tests -t .` |
+| Testy | **197, wszystkie przechodzą** — `.\.venv\Scripts\python.exe -m unittest discover -s tests -t .` |
 
 Uruchamianie: `.\run.ps1` (z konsolą) albo `.\run.ps1 -Hidden` (tylko tray).
 Diagnostyka: `.\run.ps1 -Check`.
 
 ---
 
-## NASTĘPNY KROK (jedyna otwarta rzecz)
+## NASTĘPNY KROK
 
-Użytkownik ma klucz API DeepSeeka i chciał porównać go z Haiku. Zapis klucza
-wysypywał się na `TypeError` — **naprawione w `f8ab41b`, ale klucz nie został
-zapisany**. Trzeba powtórzyć:
+**Benchmark DeepSeeka jest zamknięty** — klucz był już zapisany, benchmark
+poszedł, wynik niżej. Przy okazji wyszły trzy usterki, wszystkie naprawione.
 
-```powershell
-cd C:\claude_projects\whisperappwin
-.\run.ps1 -SetApiKey deepseek
-.\run.ps1 -Benchmark "no wiec yyy wez sprawdz czy ten handler znaczy ten parser user_id sie nie wywala na pustym stringu bo jakby mi sie wydaje ze tam jest blad"
-```
+Otwarte, w kolejności wartości:
 
-Tekst benchmarku jest dobrany celowo: ma przerywniki (`no wiec`, `yyy`, `jakby`),
-autopoprawkę (`ten handler znaczy ten parser`) i identyfikator `user_id`, którego
-model **nie powinien** ruszyć.
-
-**Czego nie wiemy i co ma rozstrzygnąć benchmark:**
-
-1. **Opóźnienie DeepSeeka z Polski.** To decyduje, nie cena — przy dyktowaniu
-   różnica 1 s vs 3 s jest ważniejsza niż 27 zł/miesiąc.
-2. **Jakość polskiego** DeepSeeka na tym zadaniu.
+1. **Anthropic API wciąż nieprzetestowane** — nadal brak klucza. Jedyny provider
+   bez ani jednego realnego wywołania. Gdy klucz się pojawi:
+   `.\run.ps1 -SetApiKey anthropic`, potem ten sam benchmark.
+2. **Zdecydować, czy włączyć czyszczenie na stałe** i z jakim providerem.
+   Dane do decyzji są już zebrane (tabela niżej) — brakuje tylko wyboru
+   użytkownika. Nie zmieniaj domyślnego „wyłączone" za niego.
+3. **Tryb `-Hidden`** (pythonw) i **tryb `toggle`** — nadal nietknięte na żywo.
 
 `getpass` działa poprawnie w prawdziwym oknie PowerShell. **Nie** działa pod Git
 Bash (`!` w sesji Claude Code idzie przez bash) — tam potrafi wypisać klucz na
 ekran, dlatego `--set-api-key` czyta ze stdin, gdy stdin nie jest tty.
+
+### Co rozstrzygnął benchmark
+
+Tekst testowy (przerywniki, autopoprawka `handler znaczy parser`, identyfikator
+`user_id`, którego model nie powinien ruszyć):
+
+```powershell
+.\run.ps1 -Benchmark "no wiec yyy wez sprawdz czy ten handler znaczy ten parser user_id sie nie wywala na pustym stringu bo jakby mi sie wydaje ze tam jest blad"
+```
+
+- **Opóźnienie DeepSeeka z Polski: ~1,5 s** (flash 1,62 s, pro 1,48 s). To było
+  główne pytanie i odpowiedź jest korzystna — 10× taniej *bez* płacenia czasem.
+- **Polski: dobry.** Oba modele wycięły przerywniki, zastosowały autopoprawkę
+  i **zostawiły `user_id` nietknięte**. Pro trzyma „Weź" (bliżej tonu mówiącego),
+  flash częściej je usuwa.
+- **Claude CLI: bierz Sonneta.** Zmierzone 5 razy: haiku-4-5 19,8–60+ s (dwa razy
+  timeout), sonnet-5 stabilnie 4,2–5,7 s. Narzut CLI dominuje nad modelem, więc
+  „mniejszy model = szybciej" tu nie obowiązuje. Domyślny model CLI zmieniony na
+  Sonneta (`registry.py`).
 
 ---
 
@@ -82,13 +94,22 @@ ekran, dlatego `--set-api-key` czyta ze stdin, gdy stdin nie jest tty.
   na prawdziwym dyktowaniu użytkownika. Wycięło przerywniki, zachowało sens.
 - **Menu tray** — wszystkie pozycje wywołane programowo tak, jak robi to pystray.
 
+- **DeepSeek na żywo** — oba modele, wielokrotnie, przez benchmark i przez sondy
+  bezpośrednio na API. Działa, ~1,5 s, poprawna polszczyzna.
+- **Czyszczenie włączone na stałe przez użytkownika** (`enabled = true`,
+  `claude_cli` / `claude-sonnet-5`) i przetestowane na jego realnym dyktowaniu
+  938 znaków. Sonnet poprawił przekręcone przez Whispera nazwy własne
+  (`Dipsick` → `Deepseek`, `sonet` → `Sonnet`) i podzielił wypowiedź na akapity.
+- **`--quality`** — porównanie jakościowe na 12 trudnych transkrypcjach,
+  uruchomione na wszystkich czterech gotowych kombinacjach provider/model.
+
 ## Czego NIE zweryfikowano
 
-- **DeepSeek w ogóle** — kod napisany, testy jednostkowe przechodzą, ale **żadne
-  realne wywołanie nie poszło**. To jest następny krok.
 - **Anthropic API jako provider czyszczenia** — brak klucza, nigdy nie odpalone
   na żywo. Ścieżka kodu jest ta sama co DeepSeeka (`MessagesApiProvider`), więc
-  benchmark pokryje obie, jeśli będzie klucz.
+  benchmark pokryje ją, jeśli klucz się pojawi. Uwaga: `_THINKS_BY_DEFAULT`
+  zakłada, że Haiku 4.5 nie myśli bez proszenia — **to założenie z tej samej
+  rodziny, co obalone założenie o DeepSeeku**. Sprawdź je, gdy będzie klucz.
 - **Tryb `-Hidden`** (pythonw, bez konsoli) — nieprzetestowany.
 - **Tryb `toggle`** hotkeya — pokryty testami, nieużywany na żywo.
 
@@ -111,6 +132,38 @@ w oknie klucza i w README. **Nie chowaj tego.**
 surowy transkrypt" (awaria). Pusty = sentinel `EMPTY` = „to był sam szum, nie
 wklejaj nic". Zlanie tego w jedno sprawi, że padnięte API będzie wyglądać jak
 cisza.
+
+**Provider nigdy nie zwraca pustego stringa — rzuca `ProviderError`.** To druga
+połowa reguły wyżej i została dopisana dopiero po tym, jak zdarzyła się na żywo:
+`deepseek-v4-pro` odpowiedział samym blokiem `thinking`, ze `stop_reason=end_turn`,
+czyli formalnie sukcesem. Kod skleił „żadnych bloków text" w `""`, co dalej znaczy
+`EMPTY` — **dyktowanie zniknęłoby bez śladu w logu**. Dotyczy obu providerów:
+odpowiedzi API bez bloku `text` i pustego `stdout` z CLI przy kodzie wyjścia 0.
+Pilnują tego `EmptyReplyTest` i `CliEmptyOutputTest`.
+
+**Modele DeepSeeka MYŚLĄ, jeśli im tego nie zabronić.** Wcześniejszy komentarz
+w `_THINKS_BY_DEFAULT` twierdził inaczej — to było założenie, nie pomiar, i było
+fałszywe: `thinking` pojawił się w 4/4 sondach. Na `v4-flash` rozumowanie zjadało
+cały budżet 1024 tokenów (`stop_reason=max_tokens`, zero tekstu) w **100%**
+wywołań, więc flash nie działał w ogóle. Z `thinking: {"type": "disabled"}` —
+6/6 czystych odpowiedzi w 35–44 tokenach. Nie usuwaj tych modeli ze zbioru.
+
+**Domyślny model `claude_cli` to Sonnet, nie Haiku.** Wygląda na pomyłkę, nie jest
+nią — patrz pomiary wyżej. Odwrócenie kolejności w `registry.py` sprawi, że
+domyślny wybór CLI będzie tym, który regularnie przekracza limit 60 s.
+Użytkownik potwierdził ten wybór wprost.
+
+**Domyślny model DeepSeeka to Flash — na wyraźne życzenie użytkownika.** Powód,
+który podał (Pro wolniejszy), **nie potwierdził się w pomiarach**: Pro wyszedł
+1,54 s przeciw 1,60 s Flasha, czyli szybciej. Powiedziałem mu to; wybór Flasha
+i tak jest zasadny ze względu na tokeny i to jego decyzja. Nie zmieniaj jej,
+ale nie powielaj też uzasadnienia „Pro jest wolniejszy" — jest nieprawdziwe.
+
+**Jakościowo Pro > Flash, mimo że oba dają 0 błędów w jednym przebiegu.**
+Różnica wychodzi dopiero na powtórzeniach ×5: Flash zwrócił tę samą nazwę własną
+jako `DeepSick` / `Deepsika` / `DeepSeeka` i raz zamienił znaczące „jakby" na
+„jakieś" (4/5); Pro pięć razy to samo. **Pojedynczy przebieg `--quality` nie
+rozstrzyga o modelu** — przy takim porównaniu powtarzaj najtrudniejsze przypadki.
 
 **`CredWrite` chce `str`, `CredRead` zwraca `bytes`.** API jest asymetryczne.
 Zweryfikowane empirycznie, pokryte `tests/test_credentials.py` (test
@@ -136,9 +189,16 @@ produkcyjny (`118fe29`).
 |---|---|
 | Whisper `large-v3-turbo` na CUDA | ~29× realtime, ładowanie z cache 2.9 s |
 | Claude Code CLI, trywialny prompt | 6,1 s |
-| Claude Code CLI, pełny prompt (3425 znaków) | **23,4 s** ← ta liczba się liczy |
+| **DeepSeek V4 Pro**, pełny prompt, z Polski | **1,48 s** |
+| **DeepSeek V4 Flash**, pełny prompt, z Polski | **1,62 s** |
+| **Claude CLI + Sonnet 5**, pełny prompt | **4,2–5,7 s** (5 prób, stabilnie) |
+| **Claude CLI + Haiku 4.5**, pełny prompt | **19,8–60+ s** (5 prób, 2× timeout) |
+| Dyktowanie 938 znaków: Sonnet / Flash | 10,2 s / 3,7 s — czas rośnie z długością |
+| `--quality`, 12 przypadków, błędy | pro 0, flash 0, haiku 0, sonnet 1 |
+| `--quality`, średni czas na przypadek | pro 1,54 s, flash 1,60 s, sonnet 4,25 s, haiku 20,9 s |
 | Haiku 4.5 | $1 / $5 za 1M, ~$0.0026 na dyktowanie |
 | DeepSeek V4 Flash | $0.14 / $0.28 za 1M, ~$0.00025 na dyktowanie |
+| Prompt systemowy `default` + lock `pl` | 3425 znaków, ~1150 tokenów wejścia |
 | Min. cache'owalny prefiks Haiku 4.5 | 4096 tokenów — nasz prompt ma ~1100, **cache nie działa** |
 | Anker PowerConf, WASAPI | przyjmuje **tylko** 48 kHz; MME/DirectSound łykają wszystko |
 
@@ -167,6 +227,12 @@ Weryfikuje i wychwytuje niedoróbki — słusznie. Trzy rzeczy, które się spra
 - **Mierz, nie zgaduj.** Kilka razy moje założenie („CLI to 6 s", „to mój błąd")
   było błędne, a rozstrzygał dopiero log albo sonda. Log aplikacji
   (`%APPDATA%\WhisperDictateWin\whisperdictate.log`) rozstrzygnął dwie diagnozy.
+  W sesji 2 to samo powtórzyło się w gorszej formie: **pewny siebie komentarz
+  w kodzie** („modele DeepSeeka nie myślą bez proszenia") był zmyśleniem, które
+  zablokowało cały provider. Komentarz opisujący zachowanie cudzego API to
+  hipoteza — 20-linijkowa sonda drukująca surową odpowiedź rozstrzygnęła w minutę
+  to, czego benchmark nie pokazywał. Konsola pokazywała tylko „NIEUDANE"; log
+  i sonda pokazały, że to dwa różne błędy, a jeden z nich cicho gubił tekst.
 - **Nie zawężaj mu wyboru.** Zaproponowałem tylko providerów Anthropic i słusznie
   to zakwestionował — DeepSeek jest 10× tańszy. Przy pytaniach o warianty
   uwzględniaj opcje spoza oczywistej ścieżki.

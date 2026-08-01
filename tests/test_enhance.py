@@ -104,6 +104,79 @@ class FakeProvider:
         return None
 
 
+class OneDictationOneCallTest(unittest.TestCase):
+    """A dictation goes to exactly one model: the configured one.
+
+    The comparison commands (`--benchmark`, `--quality`) do fan out across every
+    ready provider, and that is the point of them — but they are one-shot CLI
+    entry points that exit before the app starts. Nothing on the dictation path
+    may ever poll several models and pick a winner: that would burn every
+    provider's quota per dictation and make the chosen model meaningless.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.config = Config.load(Path(self._tmp.name) / "config.toml")
+        self.config.set("enhancement.enabled", True)
+
+    def test_one_enhance_makes_exactly_one_provider_call(self):
+        provider = FakeProvider(reply="Gotowe.")
+        with mock.patch.object(service.providers, "build", lambda *_a, **_k: provider):
+            EnhancementService(self.config).enhance("no wiec yyy gotowe", "pl")
+        self.assertEqual(len(provider.calls), 1)
+
+    def test_only_the_configured_provider_is_built(self):
+        built = []
+
+        def spy(name, **kwargs):
+            built.append(name)
+            return FakeProvider(reply="Gotowe.")
+
+        self.config.set("enhancement.provider", "deepseek")
+        self.config.set("enhancement.model", "deepseek-v4-flash")
+        with mock.patch.object(service.providers, "build", spy):
+            EnhancementService(self.config).enhance("tekst", "pl")
+        self.assertEqual(built, ["deepseek"])
+
+    def test_the_configured_model_is_the_one_sent(self):
+        provider = FakeProvider(reply="Gotowe.")
+        self.config.set("enhancement.provider", "deepseek")
+        self.config.set("enhancement.model", "deepseek-v4-pro")
+        with mock.patch.object(service.providers, "build", lambda *_a, **_k: provider):
+            EnhancementService(self.config).enhance("tekst", "pl")
+        self.assertEqual(provider.calls[0]["model"], "deepseek-v4-pro")
+
+    def test_a_failure_does_not_retry_on_another_model(self):
+        """Fail-soft means the raw transcript, not a second opinion."""
+        provider = FakeProvider(error=ProviderError("padlo"))
+        with mock.patch.object(service.providers, "build", lambda *_a, **_k: provider):
+            result = EnhancementService(self.config).enhance("tekst", "pl")
+        self.assertIsNone(result)
+        self.assertEqual(len(provider.calls), 1)
+
+    def test_the_dictation_path_does_not_reference_the_case_set(self):
+        """The case set is a CLI tool; the runtime must not reach for it.
+
+        Checked against the source, not `hasattr` on the package — importing
+        `quality` anywhere in the test run sets that attribute, so the runtime
+        check would pass or fail depending on test order.
+        """
+        from pathlib import Path as _Path
+
+        import whisperdictate.controller
+        import whisperdictate.enhance.service
+
+        for module in (whisperdictate.enhance.service, whisperdictate.controller):
+            source = _Path(module.__file__).read_text(encoding="utf-8")
+            self.assertNotIn("quality", source, module.__name__)
+
+    def test_quality_is_not_exported_from_the_package(self):
+        from whisperdictate import enhance as enhance_pkg
+
+        self.assertNotIn("quality", enhance_pkg.__all__)
+
+
 class EnhancementServiceTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

@@ -16,6 +16,7 @@ import logging.handlers
 import signal
 import sys
 import threading
+import time
 import tkinter as tk
 
 from . import APP_NAME, __version__, paths
@@ -359,6 +360,99 @@ def cmd_benchmark(config: Config, text: str) -> int:
     return 0
 
 
+def _combos_for(provider_filter: str | None):
+    """(provider, model) pairs to compare — every model of every provider."""
+    from .enhance import PROVIDERS as PROVIDER_SPECS
+
+    for key, provider_spec in PROVIDER_SPECS.items():
+        if provider_filter and key != provider_filter:
+            continue
+        for model in provider_spec.models:
+            yield key, model, provider_spec
+
+
+def cmd_quality(config: Config, provider_filter: str | None) -> int:
+    """Run the fixed case set through each provider and report what broke.
+
+    The latency benchmark says which provider is fast enough; this says which
+    one can be trusted with the text. A provider that mangles an identifier is
+    not a cheaper option, it is a wrong one.
+    """
+    from .enhance import quality
+
+    language = _prepare_for_enhance(config, None)
+    config.set("enhancement.timeout_seconds", 120.0, save=False)
+
+    combos = []
+    for key, model, provider_spec in _combos_for(provider_filter):
+        config.set("enhancement.provider", key, save=False)
+        config.set("enhancement.model", model, save=False)
+        problem = EnhancementService(config).check()
+        if problem:
+            print(f"POMINIETO {key} / {model}: {problem}")
+            continue
+        combos.append((key, model, provider_spec))
+
+    if not combos:
+        print("Zaden provider nie jest gotowy.")
+        return 1
+
+    print(f"\n{len(quality.CASES)} przypadkow x {len(combos)} modeli. "
+          f"Sprawdzam tylko bledy mechaniczne - styl ocen sam.\n")
+
+    results: dict[tuple[str, str], list] = {c[:2]: [] for c in combos}
+
+    for case in quality.CASES:
+        print("=" * 78)
+        print(f"[{case.name}] {case.why}")
+        print(f"  WEJSCIE: {case.text}")
+        if case.expect_empty:
+            print("  OCZEKIWANE: EMPTY (nic do wklejenia)")
+
+        for key, model, _ in combos:
+            config.set("enhancement.provider", key, save=False)
+            config.set("enhancement.model", model, save=False)
+            started = time.perf_counter()
+            result = EnhancementService(config).enhance(case.text, language)
+            elapsed = time.perf_counter() - started
+
+            cleaned = None if result is None else result.text
+            violations = quality.check(case, cleaned)
+            outcome = quality.CaseResult(case, cleaned, elapsed, violations)
+            results[(key, model)].append(outcome)
+
+            shown = "(EMPTY)" if cleaned == "" else cleaned
+            print(f"\n  {outcome.status:6} {key}/{model} ({elapsed:.2f} s)")
+            print(f"         {shown}")
+            for problem in violations:
+                print(f"         !! {problem}")
+        print()
+
+    print("=" * 78)
+    print("Podsumowanie - im mniej bledow, tym lepiej:\n")
+    print(f"  {'provider/model':<34} {'OK':>4} {'BLAD':>6} {'sr. czas':>10}")
+    ranked = sorted(
+        results.items(),
+        key=lambda item: (sum(r.failed for r in item[1]), sum(r.elapsed for r in item[1])),
+    )
+    for (key, model), outcomes in ranked:
+        bad = sum(r.failed for r in outcomes)
+        avg = sum(r.elapsed for r in outcomes) / len(outcomes)
+        print(f"  {key + '/' + model:<34} {len(outcomes) - bad:>4} {bad:>6} {avg:>9.2f}s")
+
+    print("\nSzczegoly bledow:")
+    clean_sweep = True
+    for (key, model), outcomes in ranked:
+        for outcome in outcomes:
+            if outcome.failed:
+                clean_sweep = False
+                print(f"  {key}/{model} [{outcome.case.name}]: "
+                      + "; ".join(outcome.violations))
+    if clean_sweep:
+        print("  brak - wszystkie modele przeszly wszystkie przypadki")
+    return 0
+
+
 # ------------------------------------------------------------------- app
 
 
@@ -492,6 +586,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--benchmark", metavar="TEKST",
         help="porownaj wszystkich gotowych providerow na tym samym tekscie",
     )
+    parser.add_argument(
+        "--quality", action="store_true",
+        help="porownanie jakosciowe na stalym zestawie trudnych transkrypcji",
+    )
     return parser.parse_args(argv)
 
 
@@ -506,6 +604,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_enhance(config, args.enhance, args.provider)
     if args.benchmark is not None:
         return cmd_benchmark(config, args.benchmark)
+    if args.quality:
+        return cmd_quality(config, args.provider)
     if args.list_devices:
         return cmd_list_devices(all_host_apis=args.all)
     if args.check:

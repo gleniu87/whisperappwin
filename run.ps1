@@ -38,6 +38,7 @@ param(
     [string]$Enhance,
     [string]$Provider,
     [string]$Benchmark,
+    [switch]$Quality,
     [switch]$Trace
 )
 
@@ -61,12 +62,13 @@ if ($SetApiKey)   { $appArgs += @("--set-api-key", $SetApiKey) }
 if ($Enhance)     { $appArgs += @("--enhance", $Enhance) }
 if ($Provider)    { $appArgs += @("--provider", $Provider) }
 if ($Benchmark)   { $appArgs += @("--benchmark", $Benchmark) }
+if ($Quality)     { $appArgs += "--quality" }
 
 # The package is imported from the repo root, so run from there regardless of
 # where the caller happened to be.
 Push-Location $root
 try {
-    $isOneShot = $Check -or $ListDevices -or $Record -gt 0 -or $SetApiKey -or $Enhance -or $Benchmark
+    $isOneShot = $Check -or $ListDevices -or $Record -gt 0 -or $SetApiKey -or $Enhance -or $Benchmark -or $Quality
     if ($Hidden -and -not $isOneShot) {
         Start-Process -FilePath $venvPythonw -ArgumentList $appArgs -WindowStyle Hidden
         Write-Host "WhisperDictate uruchomiony w tle. Ikona w zasobniku systemowym." -ForegroundColor Green

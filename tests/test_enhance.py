@@ -261,6 +261,174 @@ class EnhancementServiceTest(unittest.TestCase):
         self.install(FakeProvider(reply="Dobrze, zrobię to jutro rano."))
         self.assertIsNotNone(EnhancementService(self.config).enhance("dobrze", "pl"))
 
+    # -- EMPTY guard -----------------------------------------------------
+    #
+    # The mirror image of the runaway guard: that one catches a reply too long
+    # to be a clean-up, this one a reply too short. Honouring EMPTY is the only
+    # irreversible outcome in the pipeline - controller.py pastes nothing *and*
+    # returns before history.append, so nothing survives anywhere.
+    #
+    # Measured on 76 real transcripts: DeepSeek said EMPTY 0 times in 68 history
+    # entries, so this changes nothing for it. qwen3.5:9b lost 1 of 76 and
+    # qwen3.5:4b lost 3, one of them the command asserted below.
+
+    def test_empty_on_a_substantive_transcript_pastes_the_raw_text(self):
+        """Measured casualty: qwen3.5:4b answered EMPTY to this exact command.
+
+        None means "paste the raw transcript", which is the only outcome here
+        that does not destroy the dictation.
+        """
+        self.install(FakeProvider(reply="EMPTY"))
+        self.assertIsNone(
+            EnhancementService(self.config).enhance("Zaproponuj następne zadania", "pl")
+        )
+
+    def test_empty_on_pure_filler_is_still_honoured(self):
+        """The sentinel keeps working where it is right - nothing regresses for
+        the providers that only ever fire it on noise."""
+        self.install(FakeProvider(reply="EMPTY"))
+        result = EnhancementService(self.config).enhance("yyy eee no wiec yyy", "pl")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "")
+
+    def test_empty_on_a_whisper_hallucination_is_still_honoured(self):
+        """44 characters and not one filler among them, so a length rule alone
+        would reject it - and it is an expect_empty entry in the fixed case set,
+        where a wrong verdict here would fail every provider at once."""
+        self.install(FakeProvider(reply="EMPTY"))
+        result = EnhancementService(self.config).enhance(
+            "Napisy stworzone przez społeczność Amara.org", "pl"
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "")
+
+    def test_empty_on_polish_fillers_with_diacritics_is_honoured(self):
+        """The filler list is written the way the prompt writes it, without
+        diacritics; Whisper produces them. Both sides are folded, so "no więc"
+        has to match "no wiec"."""
+        self.install(FakeProvider(reply="EMPTY"))
+        result = EnhancementService(self.config).enhance("no więc yyy", "pl")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "")
+
+    def test_empty_on_a_very_short_transcript_is_honoured(self):
+        """Under the backstop nothing distinguishes a word from a cough. The
+        accepted residual loss: qwen3.5:9b discarded "Voilà." once in 76."""
+        self.install(FakeProvider(reply="EMPTY"))
+        result = EnhancementService(self.config).enhance("Voilà.", "pl")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "")
+
+    def test_a_whitespace_only_reply_is_guarded_the_same_way(self):
+        """A provider that answers with blanks must not be able to delete a
+        dictation either - output_filter cannot tell that from the sentinel."""
+        self.install(FakeProvider(reply="   \n  "))
+        self.assertIsNone(
+            EnhancementService(self.config).enhance("Zaproponuj następne zadania", "pl")
+        )
+
+    def test_the_guard_names_the_transcript_it_rescued(self):
+        """The log line is the recovery path, so it has to carry the text."""
+        self.install(FakeProvider(reply="EMPTY"))
+        with self.assertLogs("whisperdictate.enhance.service", level="WARNING") as caught:
+            EnhancementService(self.config).enhance("Zaproponuj następne zadania", "pl")
+        self.assertIn("Zaproponuj następne zadania", "\n".join(caught.output))
+
+    def test_every_filler_the_guard_trusts_appears_in_the_prompt(self):
+        """Anti-drift: the guard's list came from the prompt's own filler rules.
+
+        If a word is only in one of the two places, either the model is told to
+        strip something the guard will not forgive, or the guard forgives
+        something the model was never asked to strip.
+        """
+        import re
+
+        from whisperdictate.vocabulary import fold
+
+        # Word boundaries, not substrings. `assertIn` passed for "po" because it
+        # occurs inside "poprawnie", so the guard could have kept forgiving a word
+        # the prompt no longer mentions while this test stayed green - the exact
+        # drift it exists to catch. Same for "no", "w", "of" and "like".
+        prompt_text = fold(prompts.DEFAULT)
+        for filler in service._FILLER_WORDS:
+            self.assertRegex(prompt_text, rf"\b{re.escape(filler)}\b", filler)
+
+    def test_every_expect_empty_case_still_satisfies_the_guard(self):
+        """If the guard stopped calling these plausibly empty, `enhance()` would
+        return None for them, `cmd_quality` would read that as "the provider did
+        not answer", and the case set would report CRASH for every provider at
+        once - blaming the models for a change made here."""
+        from whisperdictate.enhance import quality
+
+        for case in quality.CASES:
+            if case.expect_empty:
+                self.assertTrue(service._plausibly_empty(case.text), case.name)
+
+    def test_empty_is_not_honoured_when_the_transcript_carries_digits(self):
+        """A number is content, and the filler rule cannot see it.
+
+        `_WORD_TOKEN` matches letters only, so every *word* of
+        "no wiec 2137 yyy 1410 eee" is a filler and the guard would call the whole
+        thing plausibly empty - throwing away the only part that meant anything.
+        Dictated times, amounts, phone numbers and codes arrive in exactly this
+        shape, wrapped in hesitation, and they are the least reconstructible
+        thing a user can lose.
+        """
+        self.install(FakeProvider(reply="EMPTY"))
+        for transcript in ("no wiec 2137 yyy 1410 eee", "um like 555 0199 you know"):
+            self.assertIsNone(
+                EnhancementService(self.config).enhance(transcript, "pl"), transcript
+            )
+
+    def test_a_reasoning_only_reply_never_counts_as_the_sentinel(self):
+        """The failure that made the guard insufficient on its own.
+
+        llama.cpp and LM Studio - the servers `enhancement.base_url` exists to
+        support - put the reasoning block inside `content`, so the provider's
+        empty-content check cannot see it. `output_filter` then strips it to "",
+        which used to be indistinguishable from EMPTY: every short dictation on
+        such a server was dropped. Measured with "dzień dobry" (11 characters,
+        inside the backstop, so the guard alone would have honoured it).
+        """
+        self.install(FakeProvider(reply="<think>just a greeting, nothing to clean</think>"))
+        self.assertIsNone(EnhancementService(self.config).enhance("dzień dobry", "pl"))
+
+    def test_the_short_transcript_backstop_sits_where_the_comment_says(self):
+        """Pinned so the constant cannot drift up into real commands: "Zamknij
+        okno" is 12 characters and "Odpal testy" 11, both already inside the
+        window, and 27 is where the protected "Zaproponuj następne zadania" sits.
+        """
+        self.assertTrue(service._plausibly_empty("a" * service._EMPTY_MAX_CHARS))
+        self.assertFalse(service._plausibly_empty("a" * (service._EMPTY_MAX_CHARS + 1)))
+        self.assertLess(service._EMPTY_MAX_CHARS, len("Zaproponuj następne zadania"))
+
+    def test_a_polish_hallucination_with_diacritics_is_still_honoured(self):
+        """The patterns are written without diacritics and Whisper emits them, so
+        matching had to fold first. Unfolded, "Dziękuję za uwagę" missed every
+        pattern, the guard refused EMPTY, and the artefact was pasted into
+        whatever had focus - a regression the guard itself introduced."""
+        self.install(FakeProvider(reply="EMPTY"))
+        result = EnhancementService(self.config).enhance("Dziękuję za uwagę.", "pl")
+        self.assertIsNotNone(result)
+        self.assertEqual(result.text, "")
+
+    def test_the_recorded_model_is_the_one_that_saw_the_text(self):
+        """`self.model` re-reads the live config, which the tray writes from
+        another thread. Reading it again when building the result let a menu click
+        during a 3-6 s local clean-up write a model into history that never saw
+        the transcript - and history is the dataset the model choice was measured
+        from, so it has to stay truthful."""
+        service_under_test = EnhancementService(self.config)
+
+        class SwitchesModelMidCall(FakeProvider):
+            def complete(self, system, user, model, timeout):  # noqa: ANN001
+                service_under_test.config.set("enhancement.model", "qwen3.5:9b", save=False)
+                return super().complete(system, user, model, timeout)
+
+        provider = self.install(SwitchesModelMidCall(reply="Cleaned."))
+        result = service_under_test.enhance("no wiec yyy zrob to", "pl")
+        self.assertEqual(result.model, provider.calls[0]["model"])
+
     # -- settings --------------------------------------------------------
 
     def test_unknown_provider_falls_back_to_anthropic(self):

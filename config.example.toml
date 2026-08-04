@@ -173,6 +173,10 @@ enabled = false
 #                Traffic: China - do not use for work content.
 # "claude_cli" - shells out to Claude Code. No key, uses your subscription;
 #                measured at ~5 s with claude-sonnet-5 and the full prompt.
+# "ollama"     - an OpenAI-compatible server on this machine. No key, and the
+#                transcript never leaves the computer. Measured at p50 3.61 s /
+#                p90 5.86 s with qwen3.5:9b on an RTX 3070 Ti Laptop (8 GB).
+#                Traffic: nowhere. Needs `ollama pull <model>` first.
 provider = "anthropic"
 
 # Cleaning a transcript is not a reasoning task, so the fastest model wins.
@@ -180,9 +184,22 @@ provider = "anthropic"
 # automatically. Offered per provider:
 #   anthropic  / claude_cli : "claude-haiku-4-5", "claude-sonnet-5"
 #   deepseek                : "deepseek-v4-flash", "deepseek-v4-pro"
+#   ollama                  : "qwen3.5:9b", "gemma3:4b", "gemma4:12b"
 #
 # Under claude_cli pick claude-sonnet-5: haiku-4-5 through the CLI measured
 # 19.8-60+ s over 5 runs (timing out twice) against sonnet's steady 4.2-5.7 s.
+#
+# Under ollama the three are a real trade-off, measured over 76 transcripts:
+#   qwen3.5:9b  5.6 GB, the default. Fits entirely in VRAM next to a loaded
+#               large-v3-turbo (7774 of 8192 MiB), removes Polish fillers at
+#               least as well as DeepSeek, kept every identifier. Measured with
+#               Whisper resident: p50 3.74 s / p90 6.06 s.
+#   gemma3:4b   fastest (p50 3.32 s) and the smallest, but it barely cleans:
+#               it removed no Polish filler at all. Pick it only if 9b will
+#               not fit beside your Whisper model.
+#   gemma4:12b  cleans better than everything else measured, DeepSeek included,
+#               but does not fit: 31% of it lands on the CPU and it costs
+#               p50 11.45 s / p90 32.98 s. Usable if you do not mind waiting.
 model = "claude-haiku-4-5"
 
 # "default"  - full clean-up (fillers, self-corrections, punctuation)
@@ -192,10 +209,40 @@ prompt = "default"
 
 # Ceiling, not a wait. The API answers in about a second; the CLI needs far
 # longer. On timeout the raw transcript is pasted instead.
+#
+# The local provider needs the headroom for a different reason: Ollama unloads an
+# idle model after about five minutes, so the first dictation after a break pays a
+# cold load on top of the clean-up. The p50/p90 figures above are warm numbers,
+# and a readiness check does not warm the model - it only asks which ones exist.
 timeout_seconds = 60.0
 
 # Override the Claude Code executable if it is not on PATH.
 cli_path = ""
+
+# Where the local server listens. Empty means http://localhost:11434/v1, which is
+# Ollama's default. Point it at llama.cpp's server or LM Studio instead if you
+# prefer - they speak the same protocol. Note the /v1 suffix: it is the
+# OpenAI-compatible prefix, and Ollama's own docs show the bare root instead.
+#
+# Must be a plain http:// or https:// address with a host, and no query string or
+# fragment - anything else is rejected on load with a line in the log, because it
+# would otherwise fail once per dictation and look like clean-up doing nothing.
+#
+# If you point this at another machine, say so to yourself first: the tray, the
+# key dialog and --check all switch from "nothing leaves the machine" to naming
+# the host, because at that point the transcript does leave.
+#
+# This applies ONLY to the "ollama" provider. The key-carrying providers ignore
+# it on purpose: redirecting them would send your API key to whatever address is
+# written here, and the tray would still be telling you the traffic goes to
+# Anthropic or DeepSeek.
+#
+# One thing to know before blaming the app: if the server or the model ignores
+# the "reasoning_effort" hint, a thinking model spends its whole token budget
+# reasoning and returns no text. Measured on deepseek-r1:8b, which does exactly
+# that. You will see clean-up quietly doing nothing and the raw transcript pasted
+# instead; the log says why. Pick a model that can stop thinking.
+base_url = ""
 
 # API keys are NOT stored here. They live in Windows Credential Manager, one
 # entry per provider:
@@ -204,6 +251,7 @@ cli_path = ""
 # (or the tray: Text clean-up -> API key: ...)
 # ANTHROPIC_API_KEY / DEEPSEEK_API_KEY take precedence if set. Each provider
 # reads only its own, so one never shadows the other.
+# "claude_cli" and "ollama" need no key at all.
 
 # Literal find-and-replace applied to the transcript before pasting.
 # Case-insensitive; alphanumeric keys match on word boundaries only.

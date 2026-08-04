@@ -171,6 +171,11 @@ def cmd_check(config: Config) -> int:
     problem = enhancement.check()
     status = "OK" if problem is None else f"NOT READY ({problem})"
     print(f"  Clean-up         {enhancement.describe()} - {status}")
+    # Where the transcript goes, for the provider actually selected. Printed even
+    # for the keyless ones, because a keyless provider still has a destination -
+    # and for a redirected local server that destination is the whole question.
+    base_url = str(config.get("enhancement.base_url", "") or "")
+    print(f"    traffic        {registry.hosting(enhancement.provider_name, base_url)}")
     for key, provider_spec in PROVIDER_SPECS.items():
         if provider_spec.env_var is None:
             continue

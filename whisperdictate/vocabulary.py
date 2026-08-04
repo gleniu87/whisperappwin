@@ -126,8 +126,14 @@ class Suggestion:
 _ATOMIC = str.maketrans({"ł": "l", "Ł": "L"})
 
 
-def _fold(word: str) -> str:
-    """Lowercase, diacritics stripped - the form used only for comparison."""
+def fold(word: str) -> str:
+    """Lowercase, diacritics stripped - the form used only for comparison.
+
+    Public because the clean-up layer's EMPTY guard compares against filler
+    lists taken from the prompt, which are written without diacritics
+    ("no wiec") while Whisper produces them ("no więc"). The `ł` subtlety above
+    is exactly why that comparison must not grow its own second implementation.
+    """
     decomposed = unicodedata.normalize("NFD", word.lower().translate(_ATOMIC))
     return "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
 
@@ -163,7 +169,7 @@ def _is_repair(heard: str, corrected: str) -> bool:
     if not _looks_like_a_name(corrected):
         return False
 
-    left, right = _fold(heard), _fold(corrected)
+    left, right = fold(heard), fold(corrected)
     if left == right:
         # Differs only in diacritics or capitalisation: "wez" -> "weź". That is
         # ordinary spelling repair, not a name the decoder failed to recognise.
@@ -190,7 +196,7 @@ def detect(heard_text: str | None, cleaned_text: str | None) -> list[Suggestion]
 
     found: list[Suggestion] = []
     matcher = SequenceMatcher(
-        None, [_fold(w) for w in heard_words], [_fold(w) for w in clean_words]
+        None, [fold(w) for w in heard_words], [fold(w) for w in clean_words]
     )
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         # Only 1:1 swaps. A run of replaced words is a rephrasing, not a name.
@@ -209,11 +215,11 @@ def pending(entries, known: str | None, rejected: str | None) -> list[Suggestion
     so there is no separate list to keep in sync, and accepting a name makes its
     suggestion disappear on its own.
     """
-    settled = {_fold(t) for t in terms(known)} | {_fold(t) for t in terms(rejected)}
+    settled = {fold(t) for t in terms(known)} | {fold(t) for t in terms(rejected)}
     seen: dict[str, Suggestion] = {}
     for entry in entries:
         for found in detect(entry.get("raw_text"), entry.get("text")):
-            key = _fold(found.corrected)
+            key = fold(found.corrected)
             if key in settled or key in seen:
                 continue
             # A name is settled once accepted in any inflected form; matching on
@@ -276,11 +282,11 @@ def add(known: str | None, term: str) -> str:
     if not cleaned:
         return ", ".join(existing)
 
-    new_fold = _fold(cleaned)
+    new_fold = fold(cleaned)
     result: list[str] = []
     replaced = False
     for current in existing:
-        current_fold = _fold(current)
+        current_fold = fold(current)
         if current_fold == new_fold:
             return ", ".join(existing)  # already there, verbatim
         if _is_inflection_of(new_fold, current_fold):
@@ -306,12 +312,12 @@ def remove(known: str | None, term: str) -> str:
     after "Anthropic" is removed. Anything not there is simply not there - no
     error, because the caller is a dialog acting on what it just displayed.
     """
-    target = _fold(" ".join(str(term or "").split()))
+    target = fold(" ".join(str(term or "").split()))
     if not target:
         return ", ".join(terms(known))
     kept = [
         current for current in terms(known)
-        if _fold(current) != target and not _is_inflection_of(_fold(current), target)
+        if fold(current) != target and not _is_inflection_of(fold(current), target)
     ]
     return ", ".join(kept)
 

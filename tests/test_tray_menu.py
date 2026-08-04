@@ -20,7 +20,7 @@ from whisperdictate import audio, i18n
 from whisperdictate.audio import DeviceInfo
 from whisperdictate.config import Config
 from whisperdictate.controller import State
-from whisperdictate.enhance import EnhancementService
+from whisperdictate.enhance import EnhancementService, registry
 
 FAKE_DEVICES = [
     DeviceInfo(25, "Mikrofon (Anker PowerConf C200)", 2, 48000.0, "Windows WASAPI", False),
@@ -208,6 +208,16 @@ class TrayMenuTest(unittest.TestCase):
         labels = [str(i.text) for i in self.submenu("Czyszczenie tekstu")]
         self.assertNotIn("Ustaw klucz API...", labels)
 
+    def test_keyless_providers_get_no_api_key_entry(self):
+        """The menu skips providers whose env_var is None, and that skip is what
+        keeps the local provider from offering to store a key it never uses.
+        Asserted here because nothing else would notice if the skip disappeared -
+        dialogs.manage_api_key is otherwise unreachable for them."""
+        labels = " ".join(str(i.text) for i in self.submenu("Czyszczenie tekstu"))
+        for key, provider in registry.PROVIDERS.items():
+            if provider.env_var is None:
+                self.assertNotIn(key, labels)
+
     def test_every_action_in_the_tree_survives_being_invoked_by_pystray(self):
         """Any action with the wrong arity raises TypeError when pystray calls it.
 
@@ -231,10 +241,15 @@ class TrayMenuTest(unittest.TestCase):
                 target(SENTINEL_ICON)  # must not raise
 
         walk(list(self.tray._icon.menu))
-        # Guard against the walk silently skipping the newly nested level.
-        # Only the *selected* provider's models are iterable (see the note on
-        # nested()), so this checks the default provider's model, not DeepSeek's.
-        self.assertIn("claude-haiku-4-5", visited)
+        # Guard against the walk silently skipping the newly nested level. Only
+        # the *selected* provider's models are iterable (see the note on
+        # nested()), and the walk clicks every provider radio on its way past
+        # them - so by this point the selected provider is whichever the
+        # registry lists last. Asserting a literal model name here quietly
+        # depended on that provider happening to offer it, and broke the day a
+        # fourth provider was appended.
+        selected = self.config.get("enhancement.provider")
+        self.assertIn(registry.default_model(selected), visited)
         self.assertIn("Czat / Slack", visited)
 
     # -- radio state ----------------------------------------------------

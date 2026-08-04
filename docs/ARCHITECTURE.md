@@ -195,6 +195,19 @@ the raw transcript". An empty string means something else: the `EMPTY` sentinel 
 the prompt, i.e. "that was pure noise, paste nothing". The distinction is deliberate —
 a failure and silence look identical if both return emptiness.
 
+**`EMPTY` is only honoured on a transcript that could plausibly be empty.**
+Honouring it is the one irreversible outcome in the pipeline: `controller.py` pastes
+nothing *and* returns before `history.append`, so nothing survives — not the
+clipboard, not the history, not *Copy last transcription*. So `_plausibly_empty()`
+gates it: blank text, a known Whisper silence artefact, an all-filler transcript, or
+one under 16 characters. Anything more substantial makes `EMPTY` a provider failure
+instead, and the raw transcript gets pasted. This changed the meaning of `""` for
+every provider, not just the local one — measured, DeepSeek returned `EMPTY` 0 times
+in 68 real dictations, while `qwen3.5:9b` lost 1 transcript in 76 and `qwen3.5:4b`
+lost 3, one of them a valid command. The residual gap is a dictation short enough to
+be indistinguishable from noise; the discarded text is logged so it is at least
+recoverable.
+
 **The transcript is wrapped in `<TRANSCRIPT>`.**
 Without it a dictation that happens to be a question ("czy możesz to sprawdzić")
 reads as an instruction and the model answers it. The tag turns it into data.
@@ -214,6 +227,13 @@ Polish fillers and self-correction phrases is the functional core, not a transla
 `enhance/providers.py` can read it without a cycle. It holds what distinguishes the
 providers: `base_url`, the key's environment variable, the model list and the
 jurisdiction.
+
+`base_url` in the spec is a constant for the hosted providers and only a *default* for
+the local one, which `enhancement.base_url` overrides — the server is the user's, so
+its address has to be theirs too. `providers.build()` forwards that override only to
+the `OPENAI_API` kind. Letting it reach a key-carrying provider would post the API key
+to an arbitrary host while `hosting()` still claimed the traffic went to Anthropic or
+DeepSeek, which is precisely the fact the user relies on that function for.
 
 **DeepSeek has no client of its own.**
 It exposes an endpoint compatible with the Anthropic Messages protocol, so
@@ -249,9 +269,10 @@ make the first use after startup noticeably slower.
 
 ## What is missing relative to the original
 
-- The OpenAI, OpenRouter and Ollama clean-up providers. Three are implemented here:
-  Anthropic API, DeepSeek API and Claude Code CLI — the last two are additions the
-  original does not have.
+- The OpenAI and OpenRouter clean-up providers. Four are implemented here:
+  Anthropic API, DeepSeek API, Claude Code CLI and a local OpenAI-compatible server —
+  the middle two are additions the original does not have, and the local one covers
+  what the original used Ollama for.
 - The dashboard window with eight tabs.
 - A model manager with a download progress bar.
 - Usage statistics (the original counts words, time, and typing time saved).

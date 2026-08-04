@@ -270,7 +270,7 @@ itself (`DeepSeek` → "na DeepSeeka" in Polish, "to DeepSeek" in English). Two 
 cannot sensibly be done: `transcription.language` accepts `auto`, so under
 auto-detection there is no way to know which one to pick before transcription.
 
-**`_fold()` maps `ł` → `l` by hand.** This is not over-engineering: `ł` (U+0142) is
+**`vocabulary.fold()` maps `ł` → `l` by hand.** This is not over-engineering: `ł` (U+0142) is
 an atomic codepoint **with no NFD decomposition**, unlike ą, ć, ę, ń, ó, ś, ź, ż.
 Without that map "ustawilem" and "ustawiłem" compare as different words, which knocks
 the sequence alignment out of step and loses the real repair in the same sentence. It

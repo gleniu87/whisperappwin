@@ -261,6 +261,19 @@ class DictationController:
     def set_enhancement_model(self, model: str) -> None:
         self.config.set("enhancement.model", model)
         log.info("Clean-up model: %s", model)
+        # Same courtesy as set_enhancement_provider: say now that the model is
+        # not usable. For a local server that means "not pulled yet", which
+        # would otherwise stay invisible until the next dictation fail-softed to
+        # raw text with only a log line to show for it.
+        #
+        # `enabled` is tested first, as set_enhancement_enabled does: check()
+        # makes a network call, and making one for a feature that is switched off
+        # is both a pointless freeze of the menu thread and an outbound
+        # connection the user did not ask for.
+        if self.enhancement.enabled:
+            problem = self.enhancement.check()
+            if problem:
+                self._notify(t("notify.enhancement_problem", problem=problem), error=True)
         self._set_state(self._state)
 
     def set_enhancement_prompt(self, prompt: str) -> None:
@@ -317,7 +330,15 @@ class DictationController:
 
         if not text:
             # The prompt's EMPTY sentinel: the model judged this pure filler.
-            log.info("The clean-up layer judged the transcript empty - not pasting")
+            # This branch returns before history.append, so the log line below is
+            # the only surviving copy - hence the transcript itself, not just the
+            # fact. EnhancementService already refuses to honour EMPTY on a
+            # substantive transcript, so what reaches here should be noise; the
+            # residual case is a dictation short enough that the guard cannot
+            # tell (measured casualty: "Voilà.").
+            log.info(
+                "The clean-up layer judged the transcript empty - not pasting: %r", raw_text
+            )
             self.sounds.play("cancel")
             self._set_state(State.IDLE, t("detail.noise_rejected"))
             return

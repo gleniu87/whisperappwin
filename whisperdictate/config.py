@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import logging
 import tomllib
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +109,11 @@ DEFAULTS: dict[str, Any] = {
         # made it fail intermittently.
         "timeout_seconds": 60.0,
         "cli_path": "",
+        # Empty means "the address in the registry" (http://localhost:11434/v1).
+        # Applies only to the local OpenAI-compatible provider - a key-carrying
+        # provider is never redirected, because that would send the key to
+        # whatever host was typed here. See providers.build().
+        "base_url": "",
     },
     "replacements": {},
 }
@@ -222,6 +228,7 @@ class Config:
         self._clamp("audio.max_seconds", 5.0, 3600.0)
         self._clamp("output.paste_delay_ms", 0, 2000)
         self._clamp("history.max_entries", 0, 1_000_000)
+        self._url_or_blank("enhancement.base_url")
 
         replacements = self.get("replacements")
         if not isinstance(replacements, dict):
@@ -257,6 +264,61 @@ class Config:
             fallback = _default_for(dotted)
             log.warning("%s = %r is not one of %s - using %r", dotted, value, allowed, fallback)
             self.set(dotted, fallback, save=False)
+
+    def _url_or_blank(self, dotted: str) -> None:
+        """Blank, or something urllib can actually open.
+
+        Neither `_one_of` nor `_clamp` fits a free-form address. Without this a
+        typo would surface only as one urllib error per dictation - which
+        fail-softs to the raw transcript, so the user sees clean-up quietly doing
+        nothing and a log line they never read.
+
+        Stricter than a scheme check, because a scheme check passes several
+        addresses that then fail at request time: "http://" (no host), and
+        "http://host:port/v1" with the placeholder left in, which raises
+        urllib's InvalidURL. A query or fragment is rejected too - it cannot be
+        part of a base address, and appending "/chat/completions" after one
+        produced a URL that 404s while check() called the server unreachable.
+        """
+        value = self.get(dotted)
+        if not isinstance(value, str):
+            if value is not None:
+                self._reset(dotted, value, "is not a string")
+            return
+
+        # A value pasted from documentation often arrives padded, and schemes are
+        # case-insensitive per RFC 3986; neither is a reason to discard it.
+        cleaned = value.strip()
+        if cleaned.split("://", 1)[0].lower() in ("http", "https"):
+            cleaned = cleaned.split("://", 1)[0].lower() + "://" + cleaned.split("://", 1)[1]
+        if cleaned != value:
+            self.set(dotted, cleaned, save=False)
+            value = cleaned
+        if value == "":
+            return
+
+        if not value.startswith(("http://", "https://")):
+            self._reset(dotted, value, "is not an http:// or https:// address")
+            return
+        try:
+            parts = urllib.parse.urlsplit(value)
+            port = parts.port  # raises ValueError on a non-numeric port
+        except ValueError as exc:
+            self._reset(dotted, value, f"has an unusable port ({exc})")
+            return
+        if not parts.hostname:
+            self._reset(dotted, value, "names no host")
+            return
+        if parts.query or parts.fragment:
+            self._reset(dotted, value, "must not carry a query string or fragment")
+            return
+        if port is not None and not 1 <= port <= 65535:
+            self._reset(dotted, value, "has a port outside 1-65535")
+
+    def _reset(self, dotted: str, value: object, why: str) -> None:
+        fallback = _default_for(dotted)
+        log.warning("%s = %r %s - using %r", dotted, value, why, fallback)
+        self.set(dotted, fallback, save=False)
 
     def _clamp(self, dotted: str, low: float, high: float) -> None:
         value = self.get(dotted)

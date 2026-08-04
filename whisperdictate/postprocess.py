@@ -33,12 +33,32 @@ _HALLUCINATION_PATTERNS = tuple(
 _WHITESPACE = re.compile(r"[ \t]{2,}")
 
 
+def looks_like_hallucination(text: str) -> bool:
+    """True when the whole text is one of Whisper's silence artefacts.
+
+    Public because the clean-up layer needs the same judgement: its EMPTY guard
+    has to recognise that a transcript like "Napisy stworzone przez spolecznosc
+    Amara.org" legitimately cleans to nothing, and duplicating the pattern list
+    there is how the two copies would drift apart.
+
+    Matches against the folded form because the patterns above are written
+    without diacritics while Whisper emits them. `re.IGNORECASE` does not fold
+    "ę" to "e", so "Dziękuję za uwagę" missed every pattern and only the
+    diacritic-free spelling was ever caught - measured, and it meant the guard
+    refused the EMPTY sentinel and pasted the artefact into whatever had focus.
+    """
+    from .vocabulary import fold
+
+    folded = fold(text)
+    return any(pattern.match(folded) for pattern in _HALLUCINATION_PATTERNS)
+
+
 def clean(text: str) -> str:
     """Trim, collapse runs of spaces, and drop known hallucination boilerplate."""
     text = _WHITESPACE.sub(" ", text.strip())
     if not text:
         return ""
-    if any(pattern.match(text) for pattern in _HALLUCINATION_PATTERNS):
+    if looks_like_hallucination(text):
         log.info("Discarded a likely hallucination: %r", text)
         return ""
     return text

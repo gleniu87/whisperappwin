@@ -383,15 +383,15 @@ Anthropic `claude-haiku-4-5` and `claude-sonnet-5`.
 
 ### Which provider
 
-| | Anthropic API | DeepSeek API | Claude Code CLI |
-|---|---|---|---|
-| Default model | `claude-haiku-4-5` | `deepseek-v4-flash` | `claude-sonnet-5` |
-| Input / 1M | $1.00 | **$0.14** | — |
-| Output / 1M | $5.00 | **$0.28** | — |
-| Cost / dictation | ~$0.0026 | ~$0.00025 | subscription |
-| Time | ~1 s (not measured) | **~1.5 s** (measured from PL) | **~5 s** (measured) |
-| API key | required | required | **not needed** |
-| Traffic goes to | Anthropic (USA) | **DeepSeek (China)** | Anthropic (your subscription) |
+| | Anthropic API | DeepSeek API | Claude Code CLI | Ollama (local) |
+|---|---|---|---|---|
+| Default model | `claude-haiku-4-5` | `deepseek-v4-flash` | `claude-sonnet-5` | `qwen3.5:9b` |
+| Input / 1M | $1.00 | **$0.14** | — | — |
+| Output / 1M | $5.00 | **$0.28** | — | — |
+| Cost / dictation | ~$0.0026 | ~$0.00025 | subscription | **electricity** |
+| Time | ~1 s (not measured) | **~1.5 s** (measured from PL) | **~5 s** (measured) | ~3.6 s p50 / 5.9 s p90 (measured) |
+| API key | required | required | **not needed** | **not needed** |
+| Traffic goes to | Anthropic (USA) | **DeepSeek (China)** | Anthropic (your subscription) | **nowhere** |
 
 DeepSeek is ~10× cheaper and speaks the Anthropic Messages protocol at a different
 `base_url`, so the same client serves it. Prompt caching also works better: the
@@ -574,10 +574,12 @@ recording from the right microphone.
 
 The original has a few things this version deliberately does not reproduce:
 
-- **The OpenAI, OpenRouter and Ollama providers** for text clean-up. Three are
-  implemented: Anthropic API, DeepSeek API and Claude Code CLI (the last two are an
-  addition; the original does not have them). The `Provider` interface has a single
-  method, so adding another is one class.
+- **The OpenAI and OpenRouter providers** for text clean-up. Four are implemented:
+  Anthropic API, DeepSeek API, Claude Code CLI and a local OpenAI-compatible server
+  (the last three are an addition; the original has Ollama but not the other two).
+  The `Provider` interface has a single method, so adding another is one class — and
+  the local provider already speaks the OpenAI protocol, so pointing
+  `enhancement.base_url` at any compatible endpoint works today.
 - **A dashboard window** (8 tabs, statistics, a history browser). The history is
   written to JSONL, but you read it in an editor.
 - **Model downloads with a progress bar.** Hugging Face Hub handles that.

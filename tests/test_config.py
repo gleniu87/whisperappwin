@@ -103,6 +103,66 @@ class ConfigTest(unittest.TestCase):
     def test_the_real_detection_yields_a_language_we_have(self):
         self.assertIn(Config.load(self.path).get("ui.language"), UI_LANGUAGES)
 
+    # -- enhancement.base_url --------------------------------------------
+    #
+    # A scheme check alone let through several addresses that then failed at
+    # request time, each of them fail-softing to the raw transcript with only a
+    # log line: the user sees clean-up quietly doing nothing.
+
+    def _base_url(self, value):
+        cfg = Config.load(self.path)
+        cfg.set("enhancement.base_url", value, save=False)
+        cfg._validate()
+        return cfg.get("enhancement.base_url")
+
+    def test_blank_base_url_is_left_alone(self):
+        """Empty means "use the address in the registry"."""
+        self.assertEqual(self._base_url(""), "")
+
+    def test_a_usable_address_survives(self):
+        self.assertEqual(
+            self._base_url("http://10.0.0.5:8080/v1"), "http://10.0.0.5:8080/v1"
+        )
+
+    def test_a_placeholder_port_is_rejected(self):
+        """"http://host:port/v1" left as written raises urllib's InvalidURL at
+        request time, which is not a URLError and so escaped the provider."""
+        self.assertEqual(self._base_url("http://localhost:port/v1"), "")
+
+    def test_a_scheme_with_no_host_is_rejected(self):
+        """"http://" used to survive validation, rstrip to "http:", and report
+        "no local server answering at http:" once per dictation."""
+        self.assertEqual(self._base_url("http://"), "")
+
+    def test_a_query_string_is_rejected(self):
+        """It cannot be part of a base address, and appending the path after one
+        produced ".../v1?api_key=x/chat/completions" - a 404 on every dictation
+        while check() called the server unreachable. It is also where a token
+        would sit, which does not belong in a plaintext config."""
+        self.assertEqual(self._base_url("http://localhost:11434/v1?api_key=sk-abc"), "")
+
+    def test_a_fragment_is_rejected(self):
+        self.assertEqual(self._base_url("http://localhost:11434/v1#x"), "")
+
+    def test_a_non_http_scheme_is_rejected(self):
+        self.assertEqual(self._base_url("ftp://localhost/v1"), "")
+
+    def test_a_non_string_is_rejected(self):
+        self.assertEqual(self._base_url(11434), "")
+
+    def test_padding_from_a_paste_is_trimmed_rather_than_rejected(self):
+        """Copying an address out of documentation brings whitespace with it, and
+        that is not a reason to silently ignore what the user typed."""
+        self.assertEqual(
+            self._base_url("  http://localhost:11434/v1  "), "http://localhost:11434/v1"
+        )
+
+    def test_an_uppercase_scheme_is_accepted(self):
+        """Schemes are case-insensitive per RFC 3986."""
+        self.assertEqual(
+            self._base_url("HTTP://localhost:11434/v1"), "http://localhost:11434/v1"
+        )
+
     def test_replacements_roundtrip(self):
         cfg = Config.load(self.path)
         cfg.set("replacements", {"kubernetes": "Kubernetes"})

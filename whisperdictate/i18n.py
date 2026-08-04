@@ -157,6 +157,8 @@ MESSAGES: dict[str, dict[str, str]] = {
     "provider.anthropic.hint": {"pl": "~1 s", "en": "~1 s"},
     "provider.deepseek.hint": {"pl": "~10x tańszy", "en": "~10x cheaper"},
     "provider.claude_cli.hint": {"pl": "~5 s, bez klucza", "en": "~5 s, no key needed"},
+    # Measured with qwen3.5:9b on this machine: p50 3,61 s / p90 5,86 s.
+    "provider.ollama.hint": {"pl": "~4 s, lokalnie", "en": "~4 s, on your machine"},
     "provider.anthropic.hosting": {"pl": "Anthropic (USA)", "en": "Anthropic (USA)"},
     "provider.deepseek.hosting": {
         "pl": "DeepSeek (Chiny) - nie używać do treści służbowych",
@@ -165,6 +167,19 @@ MESSAGES: dict[str, dict[str, str]] = {
     "provider.claude_cli.hosting": {
         "pl": "Anthropic, przez Twoją subskrypcję Claude Code",
         "en": "Anthropic, through your Claude Code subscription",
+    },
+    # The counterpart to the DeepSeek warning, and the reason this provider
+    # exists: the jurisdiction is the desk the machine sits on.
+    "provider.ollama.hosting": {
+        "pl": "Twój komputer - nic nie opuszcza maszyny",
+        "en": "Your own machine - nothing leaves it",
+    },
+    # Shown instead of the above when enhancement.base_url points somewhere that
+    # is not loopback. The promise above would be false, and this is the one
+    # string a user reads to decide whether a transcript may go there.
+    "provider.ollama.hosting_remote": {
+        "pl": "Twój serwer pod {host} - transkrypcja opuszcza ten komputer",
+        "en": "Your own server at {host} - the transcript does leave this computer",
     },
     "provider.problem.no_package": {
         "pl": "brak pakietu anthropic",
@@ -177,6 +192,16 @@ MESSAGES: dict[str, dict[str, str]] = {
     "provider.problem.not_in_path": {
         "pl": "nie znaleziono {executable} w PATH",
         "en": "{executable} not found in PATH",
+    },
+    "provider.problem.server_unreachable": {
+        "pl": "lokalny serwer nie odpowiada pod {url}",
+        "en": "no local server answering at {url}",
+    },
+    # The pull command stays English in both languages - it is a command, like
+    # the run.ps1 examples elsewhere.
+    "provider.problem.model_not_pulled": {
+        "pl": "model {model} nie jest pobrany (ollama pull {model})",
+        "en": "the model {model} is not pulled (ollama pull {model})",
     },
     "enhancement.disabled": {"pl": "wyłączone", "en": "disabled"},
 
